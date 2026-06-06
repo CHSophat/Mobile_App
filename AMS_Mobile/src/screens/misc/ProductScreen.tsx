@@ -1,17 +1,21 @@
-import React, { useMemo, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  TextInput,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import productService, { ProductDto, ProductStatus } from '@services/api/productService';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { DEFAULT_FILTERS } from './ProductFilterScreen';
 import type { ProductFilters } from './ProductFilterScreen';
 
 interface ProductScreenProps {
@@ -22,168 +26,117 @@ interface ProductScreenProps {
   };
 }
 
-interface Product {
-  id: string;
-  title: string;
-  property: string;
-  beds: number;
-  baths: number;
-  area: number;
-  price: number;
-  image: string;
-  images: string[];
-  tag: 'Available' | 'Reserved' | 'Featured';
-  amenities: string[];
-  description: string;
-  address: string;
+type TagLabel = 'Available' | 'Reserved' | 'Maintenance' | 'Unavailable';
+
+function statusToTag(status: ProductStatus): TagLabel {
+  const map: Record<ProductStatus, TagLabel> = {
+    vacant: 'Available',
+    occupied: 'Reserved',
+    maintenance: 'Maintenance',
+    unavailable: 'Unavailable',
+  };
+  return map[status];
 }
 
-const MOCK: Product[] = [
-  {
-    id: '1',
-    title: 'Riverside B-204',
-    property: 'Riverside Apartments',
-    beds: 2,
-    baths: 1,
-    area: 64,
-    price: 450,
-    image: 'https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=600',
-    images: [
-      'https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=900',
-      'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900',
-      'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=900',
-    ],
-    tag: 'Available',
-    amenities: ['Wi-Fi', 'Parking', 'Gym', 'Pool', 'Security'],
-    description:
-      'Bright two-bedroom unit on the second floor with river-facing balcony.',
-    address: 'Street 240, Daun Penh, Phnom Penh',
-  },
-  {
-    id: '2',
-    title: 'Bayon A-112',
-    property: 'Bayon Residences',
-    beds: 1,
-    baths: 1,
-    area: 42,
-    price: 320,
-    image: 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=600',
-    images: [
-      'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900',
-      'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=900',
-    ],
-    tag: 'Featured',
-    amenities: ['Wi-Fi', 'Elevator', 'Security'],
-    description: 'Cozy studio steps from the Royal Palace.',
-    address: 'Street 178, Phnom Penh',
-  },
-  {
-    id: '3',
-    title: 'Sky Tower C-901',
-    property: 'Sky Tower',
-    beds: 3,
-    baths: 2,
-    area: 98,
-    price: 720,
-    image: 'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=600',
-    images: [
-      'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=900',
-      'https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=900',
-    ],
-    tag: 'Available',
-    amenities: ['Wi-Fi', 'Parking', 'Gym', 'Pool', 'Security', 'Elevator', 'Pet friendly'],
-    description: 'Penthouse with panoramic city views.',
-    address: 'BKK1, Phnom Penh',
-  },
-  {
-    id: '4',
-    title: 'Garden View D-15',
-    property: 'Garden Court',
-    beds: 2,
-    baths: 2,
-    area: 76,
-    price: 530,
-    image: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=600',
-    images: [
-      'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?w=900',
-      'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900',
-    ],
-    tag: 'Reserved',
-    amenities: ['Wi-Fi', 'Parking', 'Security'],
-    description: 'Quiet ground-floor unit with private garden.',
-    address: 'Tuol Kork, Phnom Penh',
-  },
-];
+function extractItems(res: unknown): ProductDto[] {
+  const r = res as any;
+  if (Array.isArray(r?.data?.products)) return r.data.products;
+  if (Array.isArray(r?.data?.items)) return r.data.items;
+  if (Array.isArray(r?.data)) return r.data;
+  if (Array.isArray(r?.products)) return r.products;
+  if (Array.isArray(r?.items)) return r.items;
+  if (Array.isArray(r)) return r;
+  return [];
+}
 
-const DEFAULT_FILTERS: ProductFilters = {
-  status: 'all',
-  minPrice: 200,
-  maxPrice: 1000,
-  beds: null,
-  baths: null,
-  amenities: [],
-  sort: 'newest',
-};
+function filterToApiStatus(status: ProductFilters['status']): ProductStatus | undefined {
+  if (status === 'available') return 'vacant';
+  if (status === 'reserved') return 'occupied';
+  if (status === 'maintenance') return 'maintenance';
+  return undefined;
+}
 
 const ProductScreen: React.FC<ProductScreenProps> = ({ navigation }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
+
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<ProductFilters>(DEFAULT_FILTERS);
+  const [products, setProducts] = useState<ProductDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
 
   const activeCount =
     (filters.status !== 'all' ? 1 : 0) +
     (filters.beds !== null ? 1 : 0) +
     (filters.baths !== null ? 1 : 0) +
-    (filters.amenities.length > 0 ? 1 : 0) +
-    (filters.minPrice !== DEFAULT_FILTERS.minPrice ||
-    filters.maxPrice !== DEFAULT_FILTERS.maxPrice
-      ? 1
-      : 0);
+    (filters.minPrice > 0 || filters.maxPrice < 9999 ? 1 : 0);
 
-  const tagColor = (tag: Product['tag']) => {
+  const tagColor = (tag: TagLabel) => {
     if (tag === 'Available') return t.colors.success;
-    if (tag === 'Featured') return t.colors.warning;
+    if (tag === 'Maintenance') return t.colors.warning;
     return t.colors.textSecondary;
   };
 
-  const items = useMemo(() => {
-    let result = MOCK.filter((p) => {
-      if (filters.status !== 'all') {
-        const want =
-          filters.status === 'available'
-            ? 'Available'
-            : filters.status === 'featured'
-            ? 'Featured'
-            : 'Reserved';
-        if (p.tag !== want) return false;
-      }
-      if (p.price < filters.minPrice || p.price > filters.maxPrice) return false;
-      if (filters.beds !== null && p.beds < filters.beds) return false;
-      if (filters.baths !== null && p.baths < filters.baths) return false;
-      if (
-        filters.amenities.length > 0 &&
-        !filters.amenities.every((a) => p.amenities.includes(a))
-      )
-        return false;
-      if (
-        query &&
-        !`${p.title} ${p.property}`.toLowerCase().includes(query.toLowerCase())
-      )
-        return false;
-      return true;
-    });
+  const loadProducts = useCallback(async (q: string, f: ProductFilters, isRefresh = false) => {
+    if (!isRefresh) setLoading(true);
+    setError(null);
+    try {
+      const apiStatus = filterToApiStatus(f.status);
+      const baseFilter = {
+        page: 1,
+        pageSize: 50,
+        ...(apiStatus ? { status: apiStatus } : {}),
+        ...(f.minPrice > 0 ? { minPrice: f.minPrice } : {}),
+        ...(f.maxPrice < 9999 ? { maxPrice: f.maxPrice } : {}),
+        ...(f.beds !== null ? { bedrooms: f.beds } : {}),
+      };
 
-    if (filters.sort === 'priceLow') {
-      result = [...result].sort((a, b) => a.price - b.price);
-    } else if (filters.sort === 'priceHigh') {
-      result = [...result].sort((a, b) => b.price - a.price);
-    } else if (filters.sort === 'areaHigh') {
-      result = [...result].sort((a, b) => b.area - a.area);
+      console.log('[ProductScreen] calling:', q.trim() ? 'search' : 'listUnits', baseFilter);
+
+      const res = q.trim()
+        ? await productService.search(q.trim(), baseFilter)
+        : await productService.listUnits(baseFilter);
+
+      console.log('[ProductScreen] raw response keys:', Object.keys(res as any));
+      console.log('[ProductScreen] full response:', JSON.stringify(res, null, 2));
+
+      let items: ProductDto[] = extractItems(res);
+      console.log('[ProductScreen] extracted items count:', items.length);
+
+      if (f.sort === 'priceLow') items = [...items].sort((a, b) => a.basePrice - b.basePrice);
+      else if (f.sort === 'priceHigh') items = [...items].sort((a, b) => b.basePrice - a.basePrice);
+      else if (f.sort === 'areaHigh')
+        items = [...items].sort((a, b) => (b.squareFeet ?? 0) - (a.squareFeet ?? 0));
+
+      setProducts(items);
+    } catch (e: any) {
+      console.log('[ProductScreen] ERROR status:', e?.response?.status);
+      console.log('[ProductScreen] ERROR message:', e?.message);
+      console.log('[ProductScreen] ERROR response data:', JSON.stringify(e?.response?.data));
+      console.log('[ProductScreen] ERROR config url:', e?.config?.url);
+      console.log('[ProductScreen] ERROR config baseURL:', e?.config?.baseURL);
+      setError(e?.message ?? 'Failed to load products');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
+  }, []);
 
-    return result;
-  }, [query, filters]);
+  useEffect(() => {
+    clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      loadProducts(query, filters);
+    }, 400);
+    return () => clearTimeout(searchTimer.current);
+  }, [query, filters, loadProducts]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadProducts(query, filters, true);
+  };
 
   const openFilter = () => {
     navigation.navigate('ProductFilterScreen', {
@@ -192,31 +145,108 @@ const ProductScreen: React.FC<ProductScreenProps> = ({ navigation }) => {
     });
   };
 
-  const openDetails = (p: Product) => {
-    navigation.navigate('ProductDetailsScreen', {
-      product: {
-        id: p.id,
-        title: p.title,
-        property: p.property,
-        beds: p.beds,
-        baths: p.baths,
-        area: p.area,
-        price: p.price,
-        images: p.images,
-        tag: p.tag,
-        description: p.description,
-        amenities: p.amenities,
-        address: p.address,
-      },
-    });
+  const openDetails = (product: ProductDto) => {
+    navigation.navigate('ProductDetailsScreen', { productId: product.id });
   };
 
-  const Meta: React.FC<{ icon: any; label: string }> = ({ icon, label }) => (
-    <View style={styles.metaItem}>
-      <Ionicons name={icon} size={13} color={t.colors.textSecondary} />
-      <Text style={styles.metaLabel}>{label}</Text>
-    </View>
-  );
+  const typeIcon = (type: ProductDto['productType']): any => {
+    const map: Record<string, any> = {
+      unit: 'home-outline',
+      parking: 'car-outline',
+      storage: 'cube-outline',
+      amenity: 'star-outline',
+    };
+    return map[type] ?? 'business-outline';
+  };
+
+  const typeLabel = (type: ProductDto['productType']): string => {
+    const map: Record<string, string> = {
+      unit: 'Unit',
+      parking: 'Parking',
+      storage: 'Storage',
+      amenity: 'Amenity',
+    };
+    return map[type] ?? type;
+  };
+
+  const renderCard = ({ item: p }: { item: ProductDto }) => {
+    const tag = statusToTag(p.status);
+    const color = tagColor(tag);
+    const sqft = p.squareFeet ? `${p.squareFeet} sqft` : '—';
+
+    return (
+      <View style={styles.card}>
+        <TouchableOpacity activeOpacity={0.9} onPress={() => openDetails(p)}>
+          {p.primaryPhoto ? (
+            <Image source={{ uri: p.primaryPhoto }} style={styles.cardImage} resizeMode="cover" />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Ionicons name={typeIcon(p.productType)} size={40} color={t.colors.primary + '88'} />
+            </View>
+          )}
+          <View style={[styles.tag, { backgroundColor: color + '22' }]}>
+            <Text style={[styles.tagText, { color }]}>{tag}</Text>
+          </View>
+        </TouchableOpacity>
+        <View style={styles.body}>
+          <Text style={styles.title} numberOfLines={1}>
+            {p.name ?? p.code}
+          </Text>
+          <Text style={styles.subtitle}>
+            {typeLabel(p.productType)}
+            {p.floorNumber != null ? ` · Floor ${p.floorNumber}` : ''}
+          </Text>
+          <View style={styles.metaRow}>
+            {p.bedrooms != null && (
+              <MetaItem icon="bed-outline" label={`${p.bedrooms} bed`} t={t} styles={styles} />
+            )}
+            {p.bathrooms != null && (
+              <MetaItem icon="water-outline" label={`${p.bathrooms} bath`} t={t} styles={styles} />
+            )}
+            <MetaItem icon="resize-outline" label={sqft} t={t} styles={styles} />
+          </View>
+          <View style={styles.footRow}>
+            <View style={styles.priceCol}>
+              <Text style={styles.price}>${p.basePrice}</Text>
+              <Text style={styles.priceUnit}>/ month</Text>
+            </View>
+            <TouchableOpacity
+              style={styles.detailsBtn}
+              activeOpacity={0.85}
+              onPress={() => openDetails(p)}
+            >
+              <Text style={styles.detailsBtnLabel}>Details</Text>
+              <Ionicons name="arrow-forward" size={14} color={t.colors.white} />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  };
+
+  const renderEmpty = () => {
+    if (loading) return null;
+    if (error) {
+      return (
+        <View style={styles.empty}>
+          <Ionicons name="cloud-offline-outline" size={36} color={t.colors.textHint} />
+          <Text style={styles.emptyText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => loadProducts(query, filters)}
+          >
+            <Text style={styles.retryLabel}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return (
+      <View style={styles.empty}>
+        <Ionicons name="cube-outline" size={36} color={t.colors.textHint} />
+        <Text style={styles.emptyText}>No products found</Text>
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -252,18 +282,16 @@ const ProductScreen: React.FC<ProductScreenProps> = ({ navigation }) => {
           placeholderTextColor={t.colors.textHint}
           style={styles.searchInput}
         />
-        <TouchableOpacity
-          style={styles.filterPill}
-          activeOpacity={0.85}
-          onPress={openFilter}
-        >
+        <TouchableOpacity style={styles.filterPill} activeOpacity={0.85} onPress={openFilter}>
           <Ionicons name="options-outline" size={14} color={t.colors.white} />
           <Text style={styles.filterPillLabel}>Filter</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.resultRow}>
-        <Text style={styles.resultText}>{items.length} result{items.length === 1 ? '' : 's'}</Text>
+        <Text style={styles.resultText}>
+          {loading ? 'Loading…' : `${products.length} result${products.length === 1 ? '' : 's'}`}
+        </Text>
         {activeCount > 0 ? (
           <TouchableOpacity onPress={() => setFilters(DEFAULT_FILTERS)}>
             <Text style={styles.clearText}>Clear filters</Text>
@@ -271,73 +299,44 @@ const ProductScreen: React.FC<ProductScreenProps> = ({ navigation }) => {
         ) : null}
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.list}
-        showsVerticalScrollIndicator={false}
-      >
-        {items.length === 0 ? (
-          <View style={styles.empty}>
-            <Ionicons name="cube-outline" size={36} color={t.colors.textHint} />
-            <Text style={styles.emptyText}>No matches</Text>
-          </View>
-        ) : (
-          items.map((p) => (
-            <View key={p.id} style={styles.card}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                onPress={() => openDetails(p)}
-              >
-                <Image source={{ uri: p.image }} style={styles.image} />
-                <View
-                  style={[
-                    styles.tag,
-                    { backgroundColor: tagColor(p.tag) + '22' },
-                  ]}
-                >
-                  <Text style={[styles.tagText, { color: tagColor(p.tag) }]}>
-                    {p.tag}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-              <View style={styles.body}>
-                <Text style={styles.title}>{p.title}</Text>
-                <Text style={styles.subtitle}>{p.property}</Text>
-                <View style={styles.metaRow}>
-                  <Meta icon="bed-outline" label={`${p.beds} bed`} />
-                  <Meta icon="water-outline" label={`${p.baths} bath`} />
-                  <Meta icon="resize-outline" label={`${p.area} m²`} />
-                </View>
-                <View style={styles.footRow}>
-                  <View style={styles.priceCol}>
-                    <Text style={styles.price}>${p.price}</Text>
-                    <Text style={styles.priceUnit}>/ month</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={styles.detailsBtn}
-                    activeOpacity={0.85}
-                    onPress={() => openDetails(p)}
-                  >
-                    <Text style={styles.detailsBtnLabel}>Details</Text>
-                    <Ionicons
-                      name="arrow-forward"
-                      size={14}
-                      color={t.colors.white}
-                    />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ))
-        )}
-      </ScrollView>
+      {loading && !refreshing ? (
+        <View style={styles.loader}>
+          <ActivityIndicator size="large" color={t.colors.primary} />
+        </View>
+      ) : (
+        <FlatList
+          data={products}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderCard}
+          contentContainerStyle={styles.list}
+          showsVerticalScrollIndicator={false}
+          ListEmptyComponent={renderEmpty}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={t.colors.primary}
+            />
+          }
+        />
+      )}
     </SafeAreaView>
   );
 };
 
-const makeStyles = (
-  c: ReturnType<typeof useTheme>['colors'],
-  fs: number
-) =>
+const MetaItem: React.FC<{
+  icon: any;
+  label: string;
+  t: ReturnType<typeof useTheme>;
+  styles: ReturnType<typeof makeStyles>;
+}> = ({ icon, label, t, styles }) => (
+  <View style={styles.metaItem}>
+    <Ionicons name={icon} size={13} color={t.colors.textSecondary} />
+    <Text style={styles.metaLabel}>{label}</Text>
+  </View>
+);
+
+const makeStyles = (c: ReturnType<typeof useTheme>['colors'], fs: number) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
     headerRow: {
@@ -375,12 +374,7 @@ const makeStyles = (
       borderWidth: 1,
       borderColor: c.border,
     },
-    searchInput: {
-      flex: 1,
-      fontSize: 14 * fs,
-      color: c.text,
-      paddingVertical: 0,
-    },
+    searchInput: { flex: 1, fontSize: 14 * fs, color: c.text, paddingVertical: 0 },
     filterPill: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -401,10 +395,8 @@ const makeStyles = (
     },
     resultText: { fontSize: 13 * fs, color: c.textSecondary },
     clearText: { fontSize: 13 * fs, color: c.primary, fontWeight: '600' },
-    list: {
-      paddingHorizontal: spacing.xl,
-      paddingBottom: spacing['4xl'],
-    },
+    loader: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    list: { paddingHorizontal: spacing.xl, paddingBottom: spacing['4xl'] },
     card: {
       backgroundColor: c.surface,
       borderRadius: 14,
@@ -413,7 +405,14 @@ const makeStyles = (
       overflow: 'hidden',
       marginBottom: spacing.md,
     },
-    image: { width: '100%', height: 160 },
+    cardImage: { width: '100%', height: 160 },
+    imagePlaceholder: {
+      width: '100%',
+      height: 160,
+      backgroundColor: c.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     tag: {
       position: 'absolute',
       top: spacing.sm,
@@ -426,12 +425,7 @@ const makeStyles = (
     body: { padding: spacing.md },
     title: { fontSize: 16 * fs, fontWeight: '700', color: c.text },
     subtitle: { fontSize: 12 * fs, color: c.textSecondary, marginTop: 2 },
-    metaRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: spacing.md,
-      marginTop: spacing.sm,
-    },
+    metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.md, marginTop: spacing.sm },
     metaItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     metaLabel: { fontSize: 12 * fs, color: c.textSecondary },
     footRow: {
@@ -453,12 +447,16 @@ const makeStyles = (
       borderRadius: 999,
     },
     detailsBtnLabel: { color: c.white, fontSize: 13 * fs, fontWeight: '700' },
-    empty: {
-      alignItems: 'center',
-      paddingVertical: spacing['4xl'],
-      gap: spacing.sm,
+    empty: { alignItems: 'center', paddingVertical: spacing['4xl'], gap: spacing.sm },
+    emptyText: { color: c.textSecondary, fontSize: 14 * fs, textAlign: 'center' },
+    retryBtn: {
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.xl,
+      paddingVertical: spacing.sm,
+      borderRadius: 999,
+      backgroundColor: c.primary,
     },
-    emptyText: { color: c.textSecondary, fontSize: 14 * fs },
+    retryLabel: { color: c.white, fontSize: 13 * fs, fontWeight: '600' },
   });
 
 export default ProductScreen;
