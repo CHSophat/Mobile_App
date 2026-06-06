@@ -23,9 +23,27 @@ export interface ChatMessage {
   sentAt: string;
 }
 
+export interface CreateConversationRequest {
+  subject?: string;
+  propertyId?: number;
+  /** Other user ids to include in the conversation. */
+  participantIds?: number[];
+  /** Optional first message to post on creation. */
+  message?: string;
+}
+
 export const conversationService = {
   async list(): Promise<Conversation[]> {
     const res = await apiClient.get<ApiResponse<Conversation[]>>(endpointsV2.conversations.list);
+    return unwrap(res);
+  },
+
+  /** POST /conversations — start a new conversation. */
+  async create(payload: CreateConversationRequest = {}): Promise<Conversation> {
+    const res = await apiClient.post<ApiResponse<Conversation>>(
+      endpointsV2.conversations.create,
+      payload
+    );
     return unwrap(res);
   },
 
@@ -55,5 +73,25 @@ export const conversationService = {
   async markRead(id: number | string): Promise<void> {
     const res = await apiClient.post<ApiResponse<void>>(endpointsV2.conversations.read(id), {});
     unwrap(res);
+  },
+
+  /**
+   * Builds the WebSocket URL for the realtime message stream (GET /ws/messages).
+   * The `/ws` route lives at the server root, not under /api/v1, so we derive the
+   * origin from the API base URL and swap http(s) → ws(s). Pass the access token
+   * to authenticate the socket (many gateways accept it as a query param).
+   */
+  wsUrl(token?: string): string {
+    const base = apiClient.getBaseURL();
+    let origin = base;
+    try {
+      origin = new URL(base).origin;
+    } catch {
+      // Relative/invalid base — strip any /api/... path segment as a fallback.
+      origin = base.replace(/\/api\/.*$/, '');
+    }
+    const wsOrigin = origin.replace(/^http/i, 'ws');
+    const url = `${wsOrigin}${endpointsV2.conversations.ws}`;
+    return token ? `${url}?access_token=${encodeURIComponent(token)}` : url;
   },
 };

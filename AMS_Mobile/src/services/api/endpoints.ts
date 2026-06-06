@@ -63,8 +63,15 @@ export const endpointsV2 = {
 
   // ===== Tenant App scope (catalog gaps now backed by Apartement_Service) =====
 
+  // Mirrors the "Invoices (Shared)" controller in Apartement_Service.
   invoices: {
+    list: '/invoices',
+    create: '/invoices',
     byId: (id: string | number) => `/invoices/${id}`,
+    update: (id: string | number) => `/invoices/${id}`,
+    delete: (id: string | number) => `/invoices/${id}`,
+    send: (id: string | number) => `/invoices/${id}/send`,
+    void: (id: string | number) => `/invoices/${id}/void`,
     pdf: (id: string | number) => `/invoices/${id}/pdf`,
     outstanding: '/invoices/outstanding',
   },
@@ -87,17 +94,26 @@ export const endpointsV2 = {
     receipt: (id: string | number) => `/payments/${id}/receipt`,
   },
 
+  // Mirrors the "Maintenance (Shared)" controller in Apartement_Service.
   maintenance: {
     requests: '/maintenance/requests',
     requestById: (id: string | number) => `/maintenance/requests/${id}`,
+    requestStatus: (id: string | number) => `/maintenance/requests/${id}/status`,
+    requestAssign: (id: string | number) => `/maintenance/requests/${id}/assign`,
     requestPhotos: (id: string | number) => `/maintenance/requests/${id}/photos`,
+    vendors: '/maintenance/vendors',
+    slaSummary: '/maintenance/sla-summary',
   },
 
+  // Mirrors the "Messaging (Shared)" controller in Apartement_Service.
   conversations: {
     list: '/conversations',
+    create: '/conversations',
     byId: (id: string | number) => `/conversations/${id}`,
     messages: (id: string | number) => `/conversations/${id}/messages`,
     read: (id: string | number) => `/conversations/${id}/read`,
+    /** Realtime message stream (WebSocket). Not under /api/v1. */
+    ws: '/ws/messages',
   },
 
   // Mirrors the "Announcements (Shared)" controller in Apartement_Service.
@@ -120,9 +136,14 @@ export const endpointsV2 = {
     prefs: '/notification-prefs',
   },
 
+  // Mirrors the "Leases (Shared)" controller in Apartement_Service.
   leases: {
     byId: (id: string | number) => `/leases/${id}`,
+    status: (id: string | number) => `/leases/${id}/status`,
+    sendForSignature: (id: string | number) => `/leases/${id}/send-for-signature`,
     sign: (id: string | number) => `/leases/${id}/sign`,
+    renew: (id: string | number) => `/leases/${id}/renew`,
+    terminate: (id: string | number) => `/leases/${id}/terminate`,
     documents: (id: string | number) => `/leases/${id}/documents`,
   },
 

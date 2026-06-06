@@ -48,6 +48,32 @@ export interface ListMaintenanceParams {
   customerId?: number;
 }
 
+export interface Vendor {
+  id: number;
+  name: string;
+  trade: string | null;
+  phone: string | null;
+  email: string | null;
+  rating: number | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CreateVendorRequest {
+  name: string;
+  trade?: string;
+  phone?: string;
+  email?: string;
+}
+
+export interface SlaSummary {
+  open: number;
+  inProgress: number;
+  overdue: number;
+  completedThisMonth: number;
+  avgResolutionHours: number;
+}
+
 export const maintenanceServiceV2 = {
   async list(
     params: ListMaintenanceParams = {}
@@ -75,6 +101,58 @@ export const maintenanceServiceV2 = {
   async byId(id: number | string): Promise<MaintenanceRequest> {
     const res = await apiClient.get<ApiResponse<MaintenanceRequest>>(
       endpointsV2.maintenance.requestById(id)
+    );
+    return unwrap(res);
+  },
+
+  /** PATCH /maintenance/requests/{id}/status — move a request through its lifecycle. */
+  async updateStatus(
+    id: number | string,
+    status: MaintenanceStatus,
+    responseNote?: string
+  ): Promise<MaintenanceRequest> {
+    const res = await apiClient.patch<ApiResponse<MaintenanceRequest>>(
+      endpointsV2.maintenance.requestStatus(id),
+      { status, responseNote }
+    );
+    return unwrap(res);
+  },
+
+  /** PATCH /maintenance/requests/{id}/assign — assign to a staff member or vendor. */
+  async assign(
+    id: number | string,
+    assignee: { assignedTo?: number; vendorId?: number }
+  ): Promise<MaintenanceRequest> {
+    const res = await apiClient.patch<ApiResponse<MaintenanceRequest>>(
+      endpointsV2.maintenance.requestAssign(id),
+      assignee
+    );
+    return unwrap(res);
+  },
+
+  // --- Vendors ---
+
+  /** GET /maintenance/vendors. */
+  async listVendors(): Promise<Vendor[]> {
+    const res = await apiClient.get<ApiResponse<Vendor[]>>(
+      endpointsV2.maintenance.vendors
+    );
+    return unwrap(res);
+  },
+
+  /** POST /maintenance/vendors. */
+  async createVendor(payload: CreateVendorRequest): Promise<Vendor> {
+    const res = await apiClient.post<ApiResponse<Vendor>>(
+      endpointsV2.maintenance.vendors,
+      payload
+    );
+    return unwrap(res);
+  },
+
+  /** GET /maintenance/sla-summary — operational KPIs for the maintenance queue. */
+  async slaSummary(): Promise<SlaSummary> {
+    const res = await apiClient.get<ApiResponse<SlaSummary>>(
+      endpointsV2.maintenance.slaSummary
     );
     return unwrap(res);
   },
