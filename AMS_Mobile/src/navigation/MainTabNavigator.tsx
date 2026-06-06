@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppSelector } from '@store/hooks';
+import { notificationService } from '@services/api/notificationService';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
 import HomeSidebar from '@components/common/HomeSidebar';
@@ -17,8 +18,6 @@ import MaintenanceListScreen from '@screens/maintenance/MaintenanceListScreen';
 import ProfileScreen from '@screens/profile/ProfileScreen';
 
 const Tab = createBottomTabNavigator();
-
-const UNREAD = 3;
 
 const iconFor = (route: string, focused: boolean): any => {
   switch (route) {
@@ -44,6 +43,24 @@ const MainTabNavigator: React.FC = () => {
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [language, setLanguage] = useState<LangCode>('en');
+  const [unread, setUnread] = useState(0);
+
+  // Keep the bell badge in sync with the backend; refetch every time the tabs
+  // regain focus (e.g. after returning from the Inbox where items get read).
+  useFocusEffect(
+    useCallback(() => {
+      if (!user) {
+        setUnread(0);
+        return;
+      }
+      notificationService
+        .unreadCount()
+        .then(setUnread)
+        .catch(() => {
+          // Non-fatal: leave the last known count.
+        });
+    }, [user])
+  );
 
   const goToParent = (target: string) => {
     const parent = navigation.getParent?.();
@@ -86,9 +103,11 @@ const MainTabNavigator: React.FC = () => {
               size={22}
               color={t.colors.text}
             />
-            {UNREAD > 0 ? (
+            {unread > 0 ? (
               <View style={styles.badge}>
-                <Text style={styles.badgeText}>{UNREAD}</Text>
+                <Text style={styles.badgeText}>
+                  {unread > 99 ? '99+' : unread}
+                </Text>
               </View>
             ) : null}
           </TouchableOpacity>

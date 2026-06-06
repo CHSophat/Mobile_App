@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAppSelector } from '@store/hooks';
 import {
   announcementService,
   Announcement,
@@ -39,7 +39,7 @@ const AnnouncementDetailScreen: React.FC<AnnouncementDetailScreenProps> = ({
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const { user } = useAuth();
+  const user = useAppSelector((s) => s.auth.user);
   const isStaff = (user?.roles ?? []).some((r) =>
     STAFF_ROLES.includes(r.toLowerCase())
   );

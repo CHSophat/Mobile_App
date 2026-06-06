@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAppSelector } from '@store/hooks';
 import {
   customerService,
   LeaseHistoryDto,
@@ -49,8 +49,10 @@ const money = (amount: number, currency: string) =>
 const MyLeasesScreen: React.FC<MyLeasesScreenProps> = ({ navigation }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const { user } = useAuth();
-  const customerId = user?.userId;
+  const user = useAppSelector((s) => s.auth.user);
+  const parsedId = Number(user?.id);
+  const customerId =
+    Number.isFinite(parsedId) && parsedId > 0 ? parsedId : undefined;
 
   const [leases, setLeases] = useState<LeaseHistoryDto[]>([]);
   const [loading, setLoading] = useState(true);

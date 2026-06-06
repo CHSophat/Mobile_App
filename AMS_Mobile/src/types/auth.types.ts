@@ -4,6 +4,8 @@ export interface AuthUser {
   phone?: string;
   displayName?: string;
   photoURL?: string;
+  /** Backend role names (e.g. "admin", "owner"); absent for plain tenants. */
+  roles?: string[];
   emailVerified: boolean;
   phoneVerified?: boolean;
   metadata?: {

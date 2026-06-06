@@ -13,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAppSelector } from '@store/hooks';
 import {
   customerService,
   LeaseDocumentDto,
@@ -52,7 +52,7 @@ const LeaseDetailScreen: React.FC<LeaseDetailScreenProps> = ({
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const { user } = useAuth();
+  const user = useAppSelector((s) => s.auth.user);
 
   const leaseId = route?.params?.leaseId;
   const [lease, setLease] = useState<LeaseHistoryDto | undefined>(

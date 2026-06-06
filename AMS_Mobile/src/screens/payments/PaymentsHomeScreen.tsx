@@ -11,7 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
+import { useAppSelector } from '@store/hooks';
 import { paymentServiceV2, Payment } from '@services/api/paymentServiceV2';
 import { invoiceService, Invoice } from '@services/api/invoiceService';
 
@@ -45,8 +45,12 @@ const PaymentsHomeScreen: React.FC<PaymentsHomeScreenProps> = ({
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const { user } = useAuth();
-  const customerId = user?.userId;
+  // Auth lives in the Redux store (see authSlice); the user id doubles as the
+  // customer id for the customer-scoped payment/invoice endpoints.
+  const user = useAppSelector((s) => s.auth.user);
+  const parsedId = Number(user?.id);
+  const customerId =
+    Number.isFinite(parsedId) && parsedId > 0 ? parsedId : undefined;
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

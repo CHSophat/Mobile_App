@@ -199,6 +199,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             </Text>
           </TouchableOpacity>
 
+          {/* Social login temporarily hidden — keep for later re-enable
           <View style={styles.dividerRow}>
             <View style={styles.dividerLine} />
             <Text style={styles.dividerText}>or</Text>
@@ -229,6 +230,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ navigation }) => {
             label="Sign in with Instagram"
             onPress={() => handleSocialLogin('instagram')}
           />
+          */}
 
           <View style={styles.signupRow}>
             <Text style={styles.signupText}>Don't have an account? </Text>
