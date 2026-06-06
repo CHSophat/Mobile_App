@@ -26,6 +26,7 @@ import ChangePasswordScreenRaw from '@screens/security/ChangePasswordScreen';
 import TwoFactorSetupScreenRaw from '@screens/security/TwoFactorSetupScreen';
 import SessionsScreenRaw from '@screens/security/SessionsScreen';
 import ConversationScreenRaw from '@screens/communication/ConversationScreen';
+import AnnouncementDetailScreenRaw from '@screens/communication/AnnouncementDetailScreen';
 import AIChatbotScreenRaw from '@screens/misc/AIChatbotScreen';
 import ThemesScreenRaw from '@screens/misc/ThemesScreen';
 import ProductScreenRaw from '@screens/misc/ProductScreen';
@@ -57,6 +58,7 @@ const ChangePasswordScreen = ChangePasswordScreenRaw as ComponentType<any>;
 const TwoFactorSetupScreen = TwoFactorSetupScreenRaw as ComponentType<any>;
 const SessionsScreen = SessionsScreenRaw as ComponentType<any>;
 const ConversationScreen = ConversationScreenRaw as ComponentType<any>;
+const AnnouncementDetailScreen = AnnouncementDetailScreenRaw as ComponentType<any>;
 const AIChatbotScreen = AIChatbotScreenRaw as ComponentType<any>;
 const ThemesScreen = ThemesScreenRaw as ComponentType<any>;
 const ProductScreen = ProductScreenRaw as ComponentType<any>;
@@ -160,6 +162,10 @@ const RootNavigator = () => {
             <Stack.Screen
               name="ConversationScreen"
               component={ConversationScreen}
+            />
+            <Stack.Screen
+              name="AnnouncementDetailScreen"
+              component={AnnouncementDetailScreen}
             />
             <Stack.Screen
               name="AIChatbotScreen"

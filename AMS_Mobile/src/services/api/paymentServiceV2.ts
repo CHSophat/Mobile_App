@@ -53,10 +53,68 @@ export interface BakongQrResponse {
   paymentId: number;
 }
 
+/** Optional filters for the shared GET /payments list endpoint. */
+export interface PaymentQuery {
+  customerId?: number;
+  status?: PaymentStatus;
+  limit?: number;
+  offset?: number;
+}
+
+/** A payment-to-invoice reconciliation record (GET /payments/unmatched, POST .../match). */
+export interface PaymentMatch {
+  matchId: number;
+  paymentId: number;
+  invoiceId: number;
+  amount: number;
+  matchedAt: string;
+}
+
+export interface MatchPaymentRequest {
+  invoiceId: number;
+  amount?: number;
+}
+
+const toQuery = (params: Record<string, string | number | undefined>): string => {
+  const pairs = Object.entries(params).filter(([, v]) => v !== undefined && v !== '');
+  return pairs.length ? `?${pairs.map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`).join('&')}` : '';
+};
+
 export const paymentServiceV2 = {
+  /** GET /payments — all payments, optionally filtered. */
+  async list(query: PaymentQuery = {}): Promise<Payment[]> {
+    const res = await apiClient.get<ApiResponse<Payment[]>>(
+      `${endpointsV2.payments.list}${toQuery(query)}`
+    );
+    return unwrap(res);
+  },
+
   async create(payload: CreatePaymentRequest): Promise<Payment> {
     const res = await apiClient.post<ApiResponse<Payment>>(endpointsV2.payments.create, payload);
     return unwrap(res);
+  },
+
+  /** GET /payments/unmatched — payments not yet reconciled to an invoice. */
+  async unmatched(): Promise<Payment[]> {
+    const res = await apiClient.get<ApiResponse<Payment[]>>(endpointsV2.payments.unmatched);
+    return unwrap(res);
+  },
+
+  /** POST /payments/{id}/match — reconcile a payment against an invoice. */
+  async match(id: number | string, payload: MatchPaymentRequest): Promise<PaymentMatch> {
+    const res = await apiClient.post<ApiResponse<PaymentMatch>>(
+      endpointsV2.payments.match(id),
+      payload
+    );
+    return unwrap(res);
+  },
+
+  /** DELETE /payments/matches/{matchId} — undo a reconciliation. */
+  async deleteMatch(matchId: number | string): Promise<void> {
+    const res = await apiClient.delete<ApiResponse<void>>(
+      endpointsV2.payments.deleteMatch(matchId)
+    );
+    unwrap(res);
   },
 
   async byId(id: number | string): Promise<Payment> {

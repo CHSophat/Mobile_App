@@ -67,13 +67,19 @@ export const endpointsV2 = {
     outstanding: '/invoices/outstanding',
   },
 
+  // Mirrors the "Payments (Shared)" controller in Apartement_Service.
   payments: {
+    list: '/payments',
     create: '/payments',
+    unmatched: '/payments/unmatched',
+    match: (id: string | number) => `/payments/${id}/match`,
+    deleteMatch: (matchId: string | number) => `/payments/matches/${matchId}`,
     byId: (id: string | number) => `/payments/${id}`,
     history: '/payments/history',
     methods: '/payments/methods',
     methodById: (id: string | number) => `/payments/methods/${id}`,
     bakongQr: '/payments/bakong-qr',
+    bakongWebhook: '/payments/bakong/webhook',
     confirm: (id: string | number) => `/payments/${id}/confirm`,
     cancel: (id: string | number) => `/payments/${id}/cancel`,
     receipt: (id: string | number) => `/payments/${id}/receipt`,
@@ -92,9 +98,14 @@ export const endpointsV2 = {
     read: (id: string | number) => `/conversations/${id}/read`,
   },
 
+  // Mirrors the "Announcements (Shared)" controller in Apartement_Service.
   announcements: {
     list: '/announcements',
+    create: '/announcements',
     byId: (id: string | number) => `/announcements/${id}`,
+    sendNow: (id: string | number) => `/announcements/${id}/send-now`,
+    deliveries: (id: string | number) => `/announcements/${id}/deliveries`,
+    coverUpload: '/announcements/cover/upload',
   },
 
   notifications: {

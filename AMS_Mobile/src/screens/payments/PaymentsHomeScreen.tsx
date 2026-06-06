@@ -1,38 +1,89 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import { paymentServiceV2, Payment } from '@services/api/paymentServiceV2';
+import { invoiceService, Invoice } from '@services/api/invoiceService';
 
 interface PaymentsHomeScreenProps {
   navigation: { navigate: (s: string, p?: any) => void };
 }
 
-const MOCK = {
-  outstanding: 450,
-  upcoming: {
-    title: 'May 2025 · Rent',
-    amount: 450,
-    dueDate: 'May 31',
-  },
-  history: [
-    { id: '1', label: 'Apr 2025', amount: 450, status: 'Paid' },
-    { id: '2', label: 'Mar 2025', amount: 450, status: 'Paid' },
-    { id: '3', label: 'Feb 2025', amount: 450, status: 'Paid' },
-  ],
+const money = (amount: number, currency = 'USD') => {
+  const symbol = currency === 'USD' ? '$' : '';
+  const suffix = currency === 'USD' ? '' : ` ${currency}`;
+  return `${symbol}${amount.toFixed(2)}${suffix}`;
 };
+
+const formatDue = (iso: string) => {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
+
+const periodLabel = (inv: Invoice) =>
+  inv.periodStart
+    ? new Date(inv.periodStart).toLocaleDateString(undefined, {
+        month: 'short',
+        year: 'numeric',
+      })
+    : inv.invoiceNumber;
 
 const PaymentsHomeScreen: React.FC<PaymentsHomeScreenProps> = ({
   navigation,
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
+  const { user } = useAuth();
+  const customerId = user?.userId;
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [outstanding, setOutstanding] = useState<Invoice[]>([]);
+  const [history, setHistory] = useState<Payment[]>([]);
+
+  const load = useCallback(async () => {
+    if (!customerId) {
+      setError('You need to be signed in to view payments.');
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      const [invoices, payments] = await Promise.all([
+        invoiceService.outstanding(customerId),
+        paymentServiceV2.history(customerId),
+      ]);
+      setOutstanding(invoices);
+      setHistory(payments);
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load payments.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [customerId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    void load();
+  }, [load]);
 
   const goTo = (target: string, params?: any) => {
     const parent = (navigation as any).getParent?.();
@@ -40,56 +91,122 @@ const PaymentsHomeScreen: React.FC<PaymentsHomeScreenProps> = ({
     else navigation.navigate(target, params);
   };
 
+  const outstandingTotal = outstanding.reduce(
+    (sum, inv) => sum + (inv.total - inv.amountPaid),
+    0
+  );
+  const currency = outstanding[0]?.currency || history[0]?.currency || 'USD';
+  const upcoming = [...outstanding].sort(
+    (a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime()
+  )[0];
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color={t.colors.primary} />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <ScrollView
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         <Text style={styles.title}>Payments</Text>
 
+        {error ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={18} color={t.colors.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
         <View style={styles.outstandingCard}>
           <Text style={styles.outstandingLabel}>Outstanding</Text>
-          <Text style={styles.outstandingAmount}>${MOCK.outstanding}</Text>
+          <Text style={styles.outstandingAmount}>
+            {money(outstandingTotal, currency)}
+          </Text>
         </View>
 
-        <View style={styles.upcomingCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.upcomingTitle}>{MOCK.upcoming.title}</Text>
-            <Text style={styles.upcomingMeta}>Due {MOCK.upcoming.dueDate}</Text>
+        {upcoming ? (
+          <View style={styles.upcomingCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.upcomingTitle}>{periodLabel(upcoming)}</Text>
+              <Text style={styles.upcomingMeta}>
+                Due {formatDue(upcoming.dueDate)}
+              </Text>
+            </View>
+            <View style={styles.upcomingRight}>
+              <Text style={styles.upcomingAmount}>
+                {money(upcoming.total - upcoming.amountPaid, upcoming.currency)}
+              </Text>
+              <TouchableOpacity
+                style={styles.payBtn}
+                activeOpacity={0.85}
+                onPress={() =>
+                  goTo('PayNowScreen', {
+                    amount: upcoming.total - upcoming.amountPaid,
+                    reference: periodLabel(upcoming),
+                    invoiceId: upcoming.id,
+                  })
+                }
+              >
+                <Text style={styles.payBtnLabel}>Pay</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-          <View style={styles.upcomingRight}>
-            <Text style={styles.upcomingAmount}>${MOCK.upcoming.amount}</Text>
-            <TouchableOpacity
-              style={styles.payBtn}
-              activeOpacity={0.85}
-              onPress={() => goTo('PayNowScreen')}
-            >
-              <Text style={styles.payBtnLabel}>Pay</Text>
-            </TouchableOpacity>
+        ) : (
+          <View style={styles.upcomingCard}>
+            <Text style={styles.upcomingMeta}>You're all caught up 🎉</Text>
           </View>
-        </View>
+        )}
 
         <Text style={styles.section}>History</Text>
         <View style={styles.historyCard}>
-          {MOCK.history.map((h, i) => (
-            <View
-              key={h.id}
-              style={[
-                styles.historyRow,
-                i < MOCK.history.length - 1 && styles.historyRowBorder,
-              ]}
-            >
-              <Text style={styles.historyLabel}>{h.label}</Text>
-              <Text style={styles.historyStatus}>{h.status}</Text>
-              <Text style={styles.historyAmount}>${h.amount}</Text>
-              <Ionicons
-                name="checkmark-circle"
-                size={18}
-                color={t.colors.success}
-              />
-            </View>
-          ))}
+          {history.length === 0 ? (
+            <Text style={styles.emptyText}>No payments yet.</Text>
+          ) : (
+            history.map((p, i) => (
+              <View
+                key={p.id}
+                style={[
+                  styles.historyRow,
+                  i < history.length - 1 && styles.historyRowBorder,
+                ]}
+              >
+                <Text style={styles.historyLabel}>
+                  {p.paidAt
+                    ? new Date(p.paidAt).toLocaleDateString(undefined, {
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : new Date(p.createdAt).toLocaleDateString()}
+                </Text>
+                <Text style={styles.historyStatus}>{p.status}</Text>
+                <Text style={styles.historyAmount}>
+                  {money(p.amount, p.currency)}
+                </Text>
+                <Ionicons
+                  name={
+                    p.status === 'succeeded'
+                      ? 'checkmark-circle'
+                      : 'ellipse-outline'
+                  }
+                  size={18}
+                  color={
+                    p.status === 'succeeded'
+                      ? t.colors.success
+                      : t.colors.textSecondary
+                  }
+                />
+              </View>
+            ))
+          )}
         </View>
 
         <Text style={styles.section}>Methods</Text>
@@ -133,10 +250,27 @@ const makeStyles = (
 ) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
+    center: { alignItems: 'center', justifyContent: 'center' },
     scroll: {
       paddingHorizontal: spacing.xl,
       paddingTop: spacing.lg,
       paddingBottom: spacing['4xl'],
+    },
+    errorCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: c.error + '14',
+      borderRadius: 12,
+      padding: spacing.md,
+      marginBottom: spacing.md,
+    },
+    errorText: { flex: 1, color: c.error, fontSize: 13 * fs },
+    emptyText: {
+      color: c.textSecondary,
+      fontSize: 14 * fs,
+      textAlign: 'center',
+      padding: spacing.lg,
     },
     title: {
       fontSize: 24 * fs,

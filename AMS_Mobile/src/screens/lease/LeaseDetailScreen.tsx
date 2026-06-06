@@ -1,15 +1,24 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
+import {
+  customerService,
+  LeaseDocumentDto,
+  LeaseHistoryDto,
+} from '@services/api/customerService';
 
 interface LeaseDetailScreenProps {
   navigation: {
@@ -17,30 +26,105 @@ interface LeaseDetailScreenProps {
     canGoBack: () => boolean;
     navigate: (s: string, p?: any) => void;
   };
-  route?: { params?: { leaseId?: string } };
+  route?: { params?: { leaseId?: number | string; lease?: LeaseHistoryDto } };
 }
 
-const MOCK = {
-  number: 'L-9821',
-  unit: 'B-204',
-  property: 'Riverside Apts',
-  start: 'Mar 1 2025',
-  end: 'Feb 28 2026',
-  rent: 450,
-  status: 'Active',
-  actionRequired: 'Review & sign addendum',
-  documents: [
-    { id: '1', label: 'Lease agreement', kind: 'pdf' },
-    { id: '2', label: 'Addendum #1', kind: 'pdf' },
-    { id: '3', label: 'Move-in checklist', kind: 'link' },
-  ] as { id: string; label: string; kind: 'pdf' | 'link' }[],
+const fmtDate = (iso?: string) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      });
 };
+
+const money = (amount: number, currency: string) =>
+  currency === 'USD'
+    ? `$${amount.toFixed(0)}`
+    : `${amount.toFixed(0)} ${currency}`;
 
 const LeaseDetailScreen: React.FC<LeaseDetailScreenProps> = ({
   navigation,
+  route,
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
+  const { user } = useAuth();
+
+  const leaseId = route?.params?.leaseId;
+  const [lease, setLease] = useState<LeaseHistoryDto | undefined>(
+    route?.params?.lease
+  );
+  const [documents, setDocuments] = useState<LeaseDocumentDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [signing, setSigning] = useState(false);
+
+  const load = useCallback(async () => {
+    if (leaseId == null) {
+      setError('Missing lease reference.');
+      setLoading(false);
+      return;
+    }
+    setError(null);
+    try {
+      setDocuments(await customerService.getLeaseDocuments(leaseId));
+    } catch (e: any) {
+      setError(e?.message || 'Failed to load lease documents.');
+    } finally {
+      setLoading(false);
+    }
+  }, [leaseId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const openDocument = async (doc: LeaseDocumentDto) => {
+    try {
+      const ok = await Linking.canOpenURL(doc.url);
+      if (ok) await Linking.openURL(doc.url);
+      else Alert.alert('Cannot open', 'This document link is not available.');
+    } catch {
+      Alert.alert('Cannot open', 'This document link is not available.');
+    }
+  };
+
+  const confirmSign = () => {
+    if (leaseId == null) return;
+    const signedName = user?.email ?? 'Tenant';
+    Alert.alert(
+      'Sign lease',
+      `By tapping Agree you sign this lease as "${signedName}" and accept its terms.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Agree & sign',
+          onPress: async () => {
+            setSigning(true);
+            try {
+              const updated = await customerService.signLease(leaseId, {
+                signedName,
+                agreedToTerms: true,
+              });
+              setLease(updated);
+              await load();
+              Alert.alert('Signed', 'Your lease has been signed.');
+            } catch (e: any) {
+              Alert.alert('Sign failed', e?.message || 'Please try again.');
+            } finally {
+              setSigning(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const title = lease ? `Lease #${lease.leaseNumber}` : 'Lease';
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -55,7 +139,7 @@ const LeaseDetailScreen: React.FC<LeaseDetailScreenProps> = ({
         ) : (
           <View style={{ width: 26 }} />
         )}
-        <Text style={styles.headerTitle}>Lease #{MOCK.number}</Text>
+        <Text style={styles.headerTitle}>{title}</Text>
         <View style={{ width: 26 }} />
       </View>
 
@@ -63,69 +147,121 @@ const LeaseDetailScreen: React.FC<LeaseDetailScreenProps> = ({
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryUnit}>
-            Unit {MOCK.unit} · {MOCK.property}
-          </Text>
-          <Text style={styles.summaryPeriod}>
-            {MOCK.start} → {MOCK.end}
-          </Text>
-          <View style={styles.summaryRow}>
-            <Text style={styles.summaryRent}>${MOCK.rent}/mo</Text>
-            <View style={styles.statusPill}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>{MOCK.status}</Text>
+        {lease ? (
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryUnit}>
+              {lease.unitLabel ? `Unit ${lease.unitLabel}` : 'Unit —'}
+              {lease.propertyName ? ` · ${lease.propertyName}` : ''}
+            </Text>
+            <Text style={styles.summaryPeriod}>
+              {fmtDate(lease.startDate)} → {fmtDate(lease.endDate)}
+            </Text>
+            <View style={styles.summaryRow}>
+              <Text style={styles.summaryRent}>
+                {money(lease.monthlyRent, lease.currency)}/mo
+              </Text>
+              <View style={styles.statusPill}>
+                <View style={styles.statusDot} />
+                <Text style={styles.statusText}>
+                  {lease.status.charAt(0).toUpperCase() + lease.status.slice(1)}
+                </Text>
+              </View>
             </View>
           </View>
-        </View>
+        ) : null}
 
         <Text style={styles.section}>Documents</Text>
-        <View style={styles.docCard}>
-          {MOCK.documents.map((d, i) => (
-            <TouchableOpacity
-              key={d.id}
-              activeOpacity={0.8}
-              style={[
-                styles.docRow,
-                i < MOCK.documents.length - 1 && styles.docRowBorder,
-              ]}
-              onPress={() =>
-                d.kind === 'link'
-                  ? navigation.navigate('MoveInChecklistScreen')
-                  : navigation.navigate('DocumentViewerScreen', { id: d.id })
-              }
-            >
-              <Ionicons
-                name={d.kind === 'pdf' ? 'document-text-outline' : 'checkbox-outline'}
-                size={20}
-                color={t.colors.primary}
-              />
-              <Text style={styles.docLabel}>
-                {d.label}
-                {d.kind === 'pdf' ? ' (PDF)' : ''}
-              </Text>
-              <Ionicons
-                name={d.kind === 'pdf' ? 'download-outline' : 'chevron-forward'}
-                size={18}
-                color={t.colors.textSecondary}
-              />
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <View style={styles.alertCard}>
-          <View style={styles.alertHeader}>
-            <Ionicons name="warning-outline" size={18} color={t.colors.warning} />
-            <Text style={styles.alertTitle}>Action required</Text>
+        {loading ? (
+          <View style={styles.loadingBox}>
+            <ActivityIndicator color={t.colors.primary} />
           </View>
-          <TouchableOpacity
-            style={styles.alertCta}
-            activeOpacity={0.85}
-            onPress={() => navigation.navigate('SignLeaseScreen')}
-          >
-            <Text style={styles.alertCtaLabel}>{MOCK.actionRequired}</Text>
-          </TouchableOpacity>
-        </View>
+        ) : error ? (
+          <View style={styles.errorCard}>
+            <Ionicons name="alert-circle" size={18} color={t.colors.error} />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : documents.length === 0 ? (
+          <View style={styles.docCard}>
+            <Text style={styles.emptyText}>No documents attached.</Text>
+          </View>
+        ) : (
+          <View style={styles.docCard}>
+            {documents.map((d, i) => (
+              <TouchableOpacity
+                key={d.id}
+                activeOpacity={0.8}
+                style={[
+                  styles.docRow,
+                  i < documents.length - 1 && styles.docRowBorder,
+                ]}
+                onPress={() => openDocument(d)}
+              >
+                <Ionicons
+                  name="document-text-outline"
+                  size={20}
+                  color={t.colors.primary}
+                />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.docLabel}>{d.fileName}</Text>
+                  {d.documentType ? (
+                    <Text style={styles.docMeta}>
+                      {d.documentType}
+                      {d.signed ? ' · Signed' : ''}
+                    </Text>
+                  ) : d.signed ? (
+                    <Text style={styles.docMeta}>Signed</Text>
+                  ) : null}
+                </View>
+                <Ionicons
+                  name="open-outline"
+                  size={18}
+                  color={t.colors.textSecondary}
+                />
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={styles.checklistLink}
+          activeOpacity={0.85}
+          onPress={() =>
+            navigation.navigate('MoveInChecklistScreen', { leaseId })
+          }
+        >
+          <Ionicons name="checkbox-outline" size={20} color={t.colors.primary} />
+          <Text style={styles.checklistLabel}>Move-in checklist</Text>
+          <Ionicons
+            name="chevron-forward"
+            size={18}
+            color={t.colors.textSecondary}
+          />
+        </TouchableOpacity>
+
+        {lease?.requiresSignature ? (
+          <View style={styles.alertCard}>
+            <View style={styles.alertHeader}>
+              <Ionicons
+                name="warning-outline"
+                size={18}
+                color={t.colors.warning}
+              />
+              <Text style={styles.alertTitle}>Action required</Text>
+            </View>
+            <TouchableOpacity
+              style={[styles.alertCta, signing && styles.alertCtaDisabled]}
+              activeOpacity={0.85}
+              disabled={signing}
+              onPress={confirmSign}
+            >
+              {signing ? (
+                <ActivityIndicator color={t.colors.white} />
+              ) : (
+                <Text style={styles.alertCtaLabel}>Review & sign lease</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </ScrollView>
     </SafeAreaView>
   );
@@ -193,6 +329,19 @@ const makeStyles = (
       marginTop: spacing.xl,
       marginBottom: spacing.sm,
     },
+    loadingBox: {
+      paddingVertical: spacing.xl,
+      alignItems: 'center',
+    },
+    errorCard: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: c.error + '14',
+      borderRadius: 12,
+      padding: spacing.md,
+    },
+    errorText: { flex: 1, color: c.error, fontSize: 13 * fs },
     docCard: {
       backgroundColor: c.surface,
       borderRadius: 14,
@@ -210,7 +359,27 @@ const makeStyles = (
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: c.border,
     },
-    docLabel: { flex: 1, fontSize: 14 * fs, color: c.text },
+    docLabel: { fontSize: 14 * fs, color: c.text },
+    docMeta: { fontSize: 12 * fs, color: c.textSecondary, marginTop: 2 },
+    emptyText: {
+      color: c.textSecondary,
+      fontSize: 13 * fs,
+      padding: spacing.lg,
+      textAlign: 'center',
+    },
+    checklistLink: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      backgroundColor: c.surface,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.lg,
+      marginTop: spacing.md,
+    },
+    checklistLabel: { flex: 1, fontSize: 14 * fs, color: c.text },
     alertCard: {
       backgroundColor: c.warning + '20',
       borderRadius: 14,
@@ -232,6 +401,7 @@ const makeStyles = (
       paddingVertical: spacing.md,
       alignItems: 'center',
     },
+    alertCtaDisabled: { opacity: 0.7 },
     alertCtaLabel: { color: c.white, fontWeight: '600', fontSize: 14 * fs },
   });
 

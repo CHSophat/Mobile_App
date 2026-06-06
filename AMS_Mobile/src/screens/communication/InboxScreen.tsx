@@ -184,7 +184,11 @@ const InboxScreen: React.FC<InboxScreenProps> = ({ navigation }) => {
                 style={styles.row}
                 activeOpacity={0.7}
                 onPress={() =>
-                  navigation.navigate('ConversationScreen', { id: item.id })
+                  item.kind === 'announcement'
+                    ? navigation.navigate('AnnouncementDetailScreen', {
+                        id: item.id,
+                      })
+                    : navigation.navigate('ConversationScreen', { id: item.id })
                 }
               >
                 <View

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -6,12 +6,18 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
 import ShareButton from '@components/common/ShareButton';
+import {
+  paymentServiceV2,
+  PaymentMethod,
+  PaymentKind,
+} from '@services/api/paymentServiceV2';
 
 interface PayNowScreenProps {
   navigation: {
@@ -19,78 +25,118 @@ interface PayNowScreenProps {
     canGoBack: () => boolean;
     navigate: (s: string, p?: any) => void;
   };
-  route?: { params?: { amount?: number; reference?: string } };
+  route?: {
+    params?: { amount?: number; reference?: string; invoiceId?: number };
+  };
 }
 
-interface Method {
+interface DisplayMethod {
   id: string;
-  kind: 'card' | 'bakong' | 'bank';
+  kind: PaymentKind;
+  paymentMethodId?: number;
   label: string;
   meta: string;
   icon: any;
   tint: string;
 }
 
+const ICONS: Record<PaymentKind, any> = {
+  card: 'card-outline',
+  bakong: 'qr-code-outline',
+  bank: 'business-outline',
+  cash: 'cash-outline',
+  wallet: 'wallet-outline',
+};
+
 const PayNowScreen: React.FC<PayNowScreenProps> = ({ navigation, route }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const amount = route?.params?.amount ?? 450;
-  const reference = route?.params?.reference ?? 'May 2025 · Rent';
+  const amount = route?.params?.amount ?? 0;
+  const reference = route?.params?.reference ?? 'Payment';
+  const invoiceId = route?.params?.invoiceId;
 
-  const METHODS: Method[] = [
-    {
-      id: 'card-1',
-      kind: 'card',
-      label: 'Visa · 4242',
-      meta: 'Expires 04/27 · Primary',
-      icon: 'card-outline',
-      tint: '#1A1F71',
-    },
-    {
-      id: 'card-2',
-      kind: 'card',
-      label: 'Mastercard · 5535',
-      meta: 'Expires 09/26',
-      icon: 'card-outline',
-      tint: '#EB001B',
-    },
-    {
-      id: 'bakong-1',
-      kind: 'bakong',
-      label: 'Bakong QR',
-      meta: 'Scan to pay from any Bakong app',
-      icon: 'qr-code-outline',
-      tint: t.colors.primary,
-    },
-    {
-      id: 'bank-1',
-      kind: 'bank',
-      label: 'Bank transfer',
-      meta: 'ACLEDA · ****8312',
-      icon: 'business-outline',
-      tint: t.colors.textSecondary,
-    },
-  ];
-
-  const [selectedId, setSelectedId] = useState(METHODS[0].id);
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  const [loadingMethods, setLoadingMethods] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  const selected = METHODS.find((m) => m.id === selectedId)!;
+  useEffect(() => {
+    let active = true;
+    paymentServiceV2
+      .listMethods()
+      .then((list) => {
+        if (active) setMethods(list);
+      })
+      .catch(() => {
+        // Non-fatal: tenant can still pay with the always-available Bakong QR.
+      })
+      .finally(() => {
+        if (active) setLoadingMethods(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Saved methods plus the always-available Bakong QR option.
+  const displayMethods = useMemo<DisplayMethod[]>(() => {
+    const saved: DisplayMethod[] = methods.map((m) => ({
+      id: `pm-${m.id}`,
+      kind: m.kind,
+      paymentMethodId: m.id,
+      label: m.label || `${m.kind.toUpperCase()} ${m.masked ?? ''}`.trim(),
+      meta: m.isDefault ? 'Primary' : m.masked || '',
+      icon: ICONS[m.kind] ?? 'card-outline',
+      tint: m.kind === 'card' ? t.colors.primaryDark : t.colors.textSecondary,
+    }));
+    return [
+      ...saved,
+      {
+        id: 'bakong',
+        kind: 'bakong',
+        label: 'Bakong QR',
+        meta: 'Scan to pay from any Bakong app',
+        icon: ICONS.bakong,
+        tint: t.colors.primary,
+      },
+    ];
+  }, [methods, t.colors]);
+
+  useEffect(() => {
+    if (!selectedId && displayMethods.length) {
+      const def = displayMethods.find((m) => m.paymentMethodId) ?? displayMethods[0];
+      setSelectedId(def.id);
+    }
+  }, [displayMethods, selectedId]);
+
+  const selected =
+    displayMethods.find((m) => m.id === selectedId) ?? displayMethods[0];
 
   const fee = 0;
   const total = amount + fee;
 
-  const onPay = () => {
+  const onPay = async () => {
+    if (paying || !selected) return;
     if (selected.kind === 'bakong') {
-      navigation.navigate('BakongQrScreen', { amount, reference });
+      navigation.navigate('BakongQrScreen', { amount, reference, invoiceId });
       return;
     }
     setPaying(true);
-    setTimeout(() => {
-      setPaying(false);
+    try {
+      const payment = await paymentServiceV2.create({
+        invoiceId,
+        methodKind: selected.kind,
+        paymentMethodId: selected.paymentMethodId,
+        amount: total,
+      });
+      await paymentServiceV2.confirm(payment.id);
       setSuccess(true);
-    }, 1000);
+    } catch (err: any) {
+      Alert.alert('Payment failed', err?.message || 'Please try again.');
+    } finally {
+      setPaying(false);
+    }
   };
 
   const SummaryRow: React.FC<{
@@ -131,7 +177,7 @@ const PayNowScreen: React.FC<PayNowScreenProps> = ({ navigation, route }) => {
           </Text>
           <View style={styles.receiptCard}>
             <ReceiptRow label="Amount" value={`$${total.toFixed(2)}`} />
-            <ReceiptRow label="Method" value={selected.label} />
+            <ReceiptRow label="Method" value={selected?.label ?? ''} />
             <ReceiptRow label="Reference" value={reference} />
             <ReceiptRow label="Date" value={new Date().toLocaleString()} />
           </View>
@@ -178,7 +224,12 @@ const PayNowScreen: React.FC<PayNowScreenProps> = ({ navigation, route }) => {
 
         <Text style={styles.section}>Choose payment method</Text>
         <View style={styles.list}>
-          {METHODS.map((m) => {
+          {loadingMethods ? (
+            <View style={styles.methodLoading}>
+              <ActivityIndicator color={t.colors.primary} />
+            </View>
+          ) : null}
+          {displayMethods.map((m) => {
             const active = selectedId === m.id;
             return (
               <TouchableOpacity
@@ -232,14 +283,14 @@ const PayNowScreen: React.FC<PayNowScreenProps> = ({ navigation, route }) => {
         <TouchableOpacity
           style={[styles.cta, paying && styles.ctaDisabled]}
           activeOpacity={0.85}
-          disabled={paying}
+          disabled={paying || !selected}
           onPress={onPay}
         >
           {paying ? (
             <ActivityIndicator color={t.colors.white} />
           ) : (
             <Text style={styles.ctaLabel}>
-              {selected.kind === 'bakong'
+              {selected?.kind === 'bakong'
                 ? 'Show Bakong QR'
                 : `Pay $${total.toFixed(2)}`}
             </Text>
@@ -308,6 +359,7 @@ const makeStyles = (
       borderBottomColor: c.border,
     },
     methodRowActive: { backgroundColor: c.primarySoft },
+    methodLoading: { padding: spacing.lg, alignItems: 'center' },
     methodIconWrap: {
       width: 40,
       height: 40,

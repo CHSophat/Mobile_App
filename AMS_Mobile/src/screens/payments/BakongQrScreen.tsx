@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -12,19 +13,19 @@ import QRCode from 'qrcode';
 import Svg, { Path } from 'react-native-svg';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
+import { paymentServiceV2 } from '@services/api/paymentServiceV2';
 
 interface BakongQrScreenProps {
   navigation: { goBack: () => void; canGoBack: () => boolean };
-  route?: { params?: { amount?: number; reference?: string } };
+  route?: {
+    params?: {
+      amount?: number;
+      reference?: string;
+      currency?: string;
+      invoiceId?: number;
+    };
+  };
 }
-
-const MOCK = {
-  amount: 450,
-  currency: 'USD',
-  reference: 'RENT-2025-05',
-  recipient: 'AMS Property · Riverside',
-  bakongAccount: 'sopheak@aclb',
-};
 
 const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
   navigation,
@@ -32,31 +33,44 @@ const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
 }) => {
   const t = useTheme();
   const styles = makeStyles(t.colors, t.fontScale);
-  const amount = route?.params?.amount ?? MOCK.amount;
-  const reference = route?.params?.reference ?? MOCK.reference;
+  const amount = route?.params?.amount ?? 0;
+  const reference = route?.params?.reference ?? 'Payment';
+  const currency = route?.params?.currency ?? 'USD';
+  const invoiceId = route?.params?.invoiceId;
 
   const [qrPath, setQrPath] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [expiresIn, setExpiresIn] = useState(300);
+  const [reloadKey, setReloadKey] = useState(0);
 
+  // Ask the backend to mint a real Bakong QR (KHQR) string for this amount,
+  // then render it locally as an SVG.
   useEffect(() => {
-    const payload = `bakong://pay?to=${encodeURIComponent(
-      MOCK.bakongAccount
-    )}&amount=${amount}&currency=${MOCK.currency}&ref=${encodeURIComponent(
-      reference
-    )}`;
-
-    QRCode.toString(payload, {
-      type: 'svg',
-      margin: 1,
-      width: 220,
-      color: { dark: '#000000', light: '#FFFFFF' },
-    })
+    let active = true;
+    setQrPath(null);
+    setLoadError(null);
+    paymentServiceV2
+      .requestBakongQr({ amount, currency, invoiceId })
+      .then(({ qrString }) =>
+        QRCode.toString(qrString, {
+          type: 'svg',
+          margin: 1,
+          width: 220,
+          color: { dark: '#000000', light: '#FFFFFF' },
+        })
+      )
       .then((svg: string) => {
+        if (!active) return;
         const m = svg.match(/<path[^>]+d="([^"]+)"/);
         if (m) setQrPath(m[1]);
       })
-      .catch(() => setQrPath(null));
-  }, [amount, reference]);
+      .catch((e: any) => {
+        if (active) setLoadError(e?.message || 'Could not generate QR code.');
+      });
+    return () => {
+      active = false;
+    };
+  }, [amount, currency, invoiceId, reloadKey]);
 
   useEffect(() => {
     if (expiresIn <= 0) return;
@@ -110,7 +124,7 @@ const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
           <Text style={styles.amountLabel}>Amount</Text>
           <Text style={styles.amountValue}>
             ${amount.toFixed(2)}
-            <Text style={styles.amountCurrency}> {MOCK.currency}</Text>
+            <Text style={styles.amountCurrency}> {currency}</Text>
           </Text>
           <Text style={styles.reference}>Ref · {reference}</Text>
         </View>
@@ -121,13 +135,14 @@ const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
               <Svg width={220} height={220} viewBox="0 0 29 29">
                 <Path d={qrPath} fill="#000000" />
               </Svg>
+            ) : loadError ? (
+              <View style={styles.qrFallback}>
+                <Ionicons name="warning-outline" size={64} color={t.colors.error} />
+                <Text style={styles.qrErrorText}>{loadError}</Text>
+              </View>
             ) : (
               <View style={styles.qrFallback}>
-                <Ionicons
-                  name="qr-code-outline"
-                  size={120}
-                  color={t.colors.text}
-                />
+                <ActivityIndicator size="large" color={t.colors.primary} />
               </View>
             )}
           </View>
@@ -141,8 +156,8 @@ const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
             </Text>
           </View>
 
-          <Text style={styles.recipient}>{MOCK.recipient}</Text>
-          <Text style={styles.account}>{MOCK.bakongAccount}</Text>
+          <Text style={styles.recipient}>Ref · {reference}</Text>
+          <Text style={styles.account}>Pay with any Bakong-enabled app</Text>
         </View>
 
         <View style={styles.steps}>
@@ -162,7 +177,10 @@ const BakongQrScreen: React.FC<BakongQrScreenProps> = ({
         <TouchableOpacity
           style={styles.refreshBtn}
           activeOpacity={0.85}
-          onPress={() => setExpiresIn(300)}
+          onPress={() => {
+            setExpiresIn(300);
+            setReloadKey((k) => k + 1);
+          }}
         >
           <Ionicons name="refresh-outline" size={18} color={t.colors.primary} />
           <Text style={styles.refreshBtnLabel}>Refresh QR</Text>
@@ -227,7 +245,13 @@ const makeStyles = (
       padding: spacing.sm,
       marginBottom: spacing.md,
     },
-    qrFallback: { alignItems: 'center', justifyContent: 'center' },
+    qrFallback: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm },
+    qrErrorText: {
+      color: c.error,
+      fontSize: 12 * fs,
+      textAlign: 'center',
+      paddingHorizontal: spacing.md,
+    },
     countdownRow: {
       flexDirection: 'row',
       alignItems: 'center',

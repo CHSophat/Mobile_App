@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -12,6 +12,10 @@ import { useTheme } from '@theme/ThemeContext';
 import { useT } from '@i18n/useT';
 import RentDueCard from '@components/payments/RentDueCard';
 import OutstandingCard from '@components/payments/OutstandingCard';
+import {
+  announcementService,
+  Announcement,
+} from '@services/api/announcementService';
 
 interface TenantHomeScreenProps {
   navigation: {
@@ -42,7 +46,6 @@ const MOCK = {
   activity: [
     { id: '1', icon: 'construct-outline', text: 'Maintenance #312 — In progress' },
     { id: '2', icon: 'cash-outline', text: 'Payment received — Apr 30' },
-    { id: '3', icon: 'megaphone-outline', text: 'New announcement — May 12' },
   ],
 };
 
@@ -57,10 +60,34 @@ const TenantHomeScreen: React.FC<TenantHomeScreenProps> = ({ navigation }) => {
   const { t: tr, fonts } = useT();
   const styles = makeStyles(t.colors, t.fontScale);
 
-  const goTo = (target: string) => {
+  const [latestAnnouncement, setLatestAnnouncement] =
+    useState<Announcement | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    announcementService
+      .list()
+      .then((list) => {
+        if (!active || !list?.length) return;
+        const newest = [...list].sort(
+          (a, b) =>
+            new Date(b.sentAt ?? b.createdAt).getTime() -
+            new Date(a.sentAt ?? a.createdAt).getTime()
+        )[0];
+        setLatestAnnouncement(newest);
+      })
+      .catch(() => {
+        // Non-fatal: home still renders without the latest announcement.
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const goTo = (target: string, params?: any) => {
     const parent = (navigation as any).getParent?.();
-    if (parent) parent.navigate(target);
-    else navigation.navigate(target);
+    if (parent) parent.navigate(target, params);
+    else navigation.navigate(target, params);
   };
 
   const goPay = () =>
@@ -134,6 +161,32 @@ const TenantHomeScreen: React.FC<TenantHomeScreenProps> = ({ navigation }) => {
           {tr('home.recentActivity')}
         </Text>
         <View style={styles.activityCard}>
+          {latestAnnouncement ? (
+            <TouchableOpacity
+              activeOpacity={0.7}
+              style={[styles.activityRow, styles.activityRowBorder]}
+              onPress={() =>
+                goTo('AnnouncementDetailScreen', {
+                  id: latestAnnouncement.id,
+                  announcement: latestAnnouncement,
+                })
+              }
+            >
+              <Ionicons
+                name="megaphone-outline"
+                size={18}
+                color={t.colors.primaryDark}
+              />
+              <Text style={styles.activityText} numberOfLines={1}>
+                {latestAnnouncement.title}
+              </Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color={t.colors.textSecondary}
+              />
+            </TouchableOpacity>
+          ) : null}
           {MOCK.activity.map((a, i) => (
             <View
               key={a.id}
