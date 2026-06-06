@@ -66,7 +66,7 @@ export interface Notification {
 export interface PushNotificationPayload {
   title: string;
   body: string;
-  badge?: string;
+  badge?: number;
   sound?: string;
   data?: Record<string, string>;
   image?: string;

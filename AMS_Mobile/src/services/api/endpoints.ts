@@ -32,7 +32,9 @@ export const endpointsV2 = {
     setStatus: (id: string | number) => `/products/${id}/status`,
     setMaintenance: (id: string | number) => `/products/${id}/maintenance`,
     maintenanceRequests: (id: string | number) => `/products/${id}/maintenance-requests`,
+    paymentBreakdown: (id: string | number) => `/products/${id}/payment-breakdown`,
     photos: (id: string | number) => `/products/${id}/photos`,
+    byProperty: '/products/by-property',
   },
   customers: {
     profile: (customerId: string | number) => `/customers/${customerId}/profile`,

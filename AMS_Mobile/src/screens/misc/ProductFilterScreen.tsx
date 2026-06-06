@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,12 +12,11 @@ import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
 
 export interface ProductFilters {
-  status: 'all' | 'available' | 'featured' | 'reserved';
+  status: 'all' | 'available' | 'reserved' | 'maintenance';
   minPrice: number;
   maxPrice: number;
   beds: number | null;
   baths: number | null;
-  amenities: string[];
   sort: 'newest' | 'priceLow' | 'priceHigh' | 'areaHigh';
 }
 
@@ -32,21 +30,20 @@ interface ProductFilterScreenProps {
   };
 }
 
-const DEFAULT_FILTERS: ProductFilters = {
+export const DEFAULT_FILTERS: ProductFilters = {
   status: 'all',
-  minPrice: 200,
-  maxPrice: 1000,
+  minPrice: 0,
+  maxPrice: 9999,
   beds: null,
   baths: null,
-  amenities: [],
   sort: 'newest',
 };
 
 const STATUSES: { key: ProductFilters['status']; label: string; icon: any }[] = [
   { key: 'all', label: 'All', icon: 'apps-outline' },
   { key: 'available', label: 'Available', icon: 'checkmark-circle-outline' },
-  { key: 'featured', label: 'Featured', icon: 'star-outline' },
   { key: 'reserved', label: 'Reserved', icon: 'lock-closed-outline' },
+  { key: 'maintenance', label: 'Maintenance', icon: 'construct-outline' },
 ];
 
 const SORTS: { key: ProductFilters['sort']; label: string; icon: any }[] = [
@@ -56,7 +53,11 @@ const SORTS: { key: ProductFilters['sort']; label: string; icon: any }[] = [
   { key: 'areaHigh', label: 'Largest area', icon: 'resize-outline' },
 ];
 
-const AMENITIES = ['Wi-Fi', 'Parking', 'Gym', 'Pool', 'Security', 'Elevator', 'Pet friendly'];
+const PRICE_CHIPS = [
+  { min: 0, max: 500, label: '< $500' },
+  { min: 500, max: 1000, label: '$500–1k' },
+  { min: 1000, max: 9999, label: '$1k+' },
+];
 
 const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
   navigation,
@@ -68,15 +69,6 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
   const [filters, setFilters] = useState<ProductFilters>(
     route?.params?.initial ?? DEFAULT_FILTERS
   );
-
-  const toggleAmenity = (a: string) => {
-    setFilters((prev) => ({
-      ...prev,
-      amenities: prev.amenities.includes(a)
-        ? prev.amenities.filter((x) => x !== a)
-        : [...prev.amenities, a],
-    }));
-  };
 
   const reset = () => setFilters(DEFAULT_FILTERS);
 
@@ -97,12 +89,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
           style={[styles.numChip, value === null && styles.numChipActive]}
           onPress={() => onChange(null)}
         >
-          <Text
-            style={[
-              styles.numChipLabel,
-              value === null && styles.numChipLabelActive,
-            ]}
-          >
+          <Text style={[styles.numChipLabel, value === null && styles.numChipLabelActive]}>
             Any
           </Text>
         </TouchableOpacity>
@@ -112,12 +99,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
             style={[styles.numChip, value === n && styles.numChipActive]}
             onPress={() => onChange(n)}
           >
-            <Text
-              style={[
-                styles.numChipLabel,
-                value === n && styles.numChipLabelActive,
-              ]}
-            >
+            <Text style={[styles.numChipLabel, value === n && styles.numChipLabelActive]}>
               {n}+
             </Text>
           </TouchableOpacity>
@@ -141,10 +123,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
         </TouchableOpacity>
       </View>
 
-      <ScrollView
-        contentContainerStyle={styles.scroll}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
         <Text style={styles.section}>Status</Text>
         <View style={styles.statusGrid}>
           {STATUSES.map((s) => {
@@ -161,12 +140,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
                   size={16}
                   color={active ? t.colors.primaryDark : t.colors.textSecondary}
                 />
-                <Text
-                  style={[
-                    styles.statusChipLabel,
-                    active && styles.statusChipLabelActive,
-                  ]}
-                >
+                <Text style={[styles.statusChipLabel, active && styles.statusChipLabelActive]}>
                   {s.label}
                 </Text>
               </TouchableOpacity>
@@ -179,43 +153,31 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
           <View style={styles.priceField}>
             <Text style={styles.subLabel}>Min</Text>
             <View style={styles.priceBox}>
-              <Text style={styles.priceBoxText}>${filters.minPrice}</Text>
+              <Text style={styles.priceBoxText}>
+                {filters.minPrice > 0 ? `$${filters.minPrice}` : 'Any'}
+              </Text>
             </View>
           </View>
           <Text style={styles.priceDash}>—</Text>
           <View style={styles.priceField}>
             <Text style={styles.subLabel}>Max</Text>
             <View style={styles.priceBox}>
-              <Text style={styles.priceBoxText}>${filters.maxPrice}</Text>
+              <Text style={styles.priceBoxText}>
+                {filters.maxPrice < 9999 ? `$${filters.maxPrice}` : 'Any'}
+              </Text>
             </View>
           </View>
         </View>
         <View style={styles.priceQuickRow}>
-          {[
-            { min: 200, max: 400, label: '< $400' },
-            { min: 400, max: 700, label: '$400–700' },
-            { min: 700, max: 1200, label: '$700+' },
-          ].map((p) => {
-            const active =
-              filters.minPrice === p.min && filters.maxPrice === p.max;
+          {PRICE_CHIPS.map((p) => {
+            const active = filters.minPrice === p.min && filters.maxPrice === p.max;
             return (
               <TouchableOpacity
                 key={p.label}
                 style={[styles.quickChip, active && styles.quickChipActive]}
-                onPress={() =>
-                  setFilters((prev) => ({
-                    ...prev,
-                    minPrice: p.min,
-                    maxPrice: p.max,
-                  }))
-                }
+                onPress={() => setFilters((prev) => ({ ...prev, minPrice: p.min, maxPrice: p.max }))}
               >
-                <Text
-                  style={[
-                    styles.quickChipLabel,
-                    active && styles.quickChipLabelActive,
-                  ]}
-                >
+                <Text style={[styles.quickChipLabel, active && styles.quickChipLabelActive]}>
                   {p.label}
                 </Text>
               </TouchableOpacity>
@@ -238,30 +200,6 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
           />
         </View>
 
-        <Text style={styles.section}>Amenities</Text>
-        <View style={styles.amenWrap}>
-          {AMENITIES.map((a) => {
-            const active = filters.amenities.includes(a);
-            return (
-              <TouchableOpacity
-                key={a}
-                style={[styles.amenChip, active && styles.amenChipActive]}
-                onPress={() => toggleAmenity(a)}
-                activeOpacity={0.85}
-              >
-                {active ? (
-                  <Ionicons name="checkmark" size={14} color={t.colors.primaryDark} />
-                ) : null}
-                <Text
-                  style={[styles.amenLabel, active && styles.amenLabelActive]}
-                >
-                  {a}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
         <Text style={styles.section}>Sort by</Text>
         <View style={styles.sortCard}>
           {SORTS.map((s, i) => {
@@ -269,10 +207,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
             return (
               <TouchableOpacity
                 key={s.key}
-                style={[
-                  styles.sortRow,
-                  i < SORTS.length - 1 && styles.sortRowBorder,
-                ]}
+                style={[styles.sortRow, i < SORTS.length - 1 && styles.sortRowBorder]}
                 onPress={() => setFilters((p) => ({ ...p, sort: s.key }))}
                 activeOpacity={0.85}
               >
@@ -292,11 +227,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        <TouchableOpacity
-          style={styles.applyBtn}
-          activeOpacity={0.85}
-          onPress={apply}
-        >
+        <TouchableOpacity style={styles.applyBtn} activeOpacity={0.85} onPress={apply}>
           <Text style={styles.applyBtnLabel}>Apply filters</Text>
         </TouchableOpacity>
       </View>
@@ -304,10 +235,7 @@ const ProductFilterScreen: React.FC<ProductFilterScreenProps> = ({
   );
 };
 
-const makeStyles = (
-  c: ReturnType<typeof useTheme>['colors'],
-  fs: number
-) =>
+const makeStyles = (c: ReturnType<typeof useTheme>['colors'], fs: number) =>
   StyleSheet.create({
     container: { flex: 1, backgroundColor: c.background },
     headerRow: {
@@ -334,11 +262,7 @@ const makeStyles = (
       marginTop: spacing.lg,
       marginBottom: spacing.sm,
     },
-    subLabel: {
-      fontSize: 12 * fs,
-      color: c.textSecondary,
-      marginBottom: 4,
-    },
+    subLabel: { fontSize: 12 * fs, color: c.textSecondary, marginBottom: 4 },
     statusGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
     statusChip: {
       flexBasis: '47%',
@@ -353,10 +277,7 @@ const makeStyles = (
       borderColor: c.border,
       backgroundColor: c.surface,
     },
-    statusChipActive: {
-      borderColor: c.primary,
-      backgroundColor: c.primarySoft,
-    },
+    statusChipActive: { borderColor: c.primary, backgroundColor: c.primarySoft },
     statusChipLabel: { fontSize: 13 * fs, color: c.text, fontWeight: '500' },
     statusChipLabelActive: { color: c.primaryDark, fontWeight: '600' },
     priceRow: { flexDirection: 'row', alignItems: 'flex-end', gap: spacing.sm },
@@ -372,11 +293,7 @@ const makeStyles = (
       justifyContent: 'center',
     },
     priceBoxText: { fontSize: 15 * fs, fontWeight: '600', color: c.text },
-    priceQuickRow: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-      marginTop: spacing.sm,
-    },
+    priceQuickRow: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm },
     quickChip: {
       paddingHorizontal: spacing.md,
       paddingVertical: 6,
@@ -385,10 +302,7 @@ const makeStyles = (
       borderWidth: 1,
       borderColor: c.border,
     },
-    quickChipActive: {
-      borderColor: c.primary,
-      backgroundColor: c.primarySoft,
-    },
+    quickChipActive: { borderColor: c.primary, backgroundColor: c.primarySoft },
     quickChipLabel: { fontSize: 12 * fs, color: c.text, fontWeight: '500' },
     quickChipLabelActive: { color: c.primaryDark, fontWeight: '600' },
     layoutRow: { flexDirection: 'row' },
@@ -402,30 +316,9 @@ const makeStyles = (
       backgroundColor: c.surface,
       alignItems: 'center',
     },
-    numChipActive: {
-      borderColor: c.primary,
-      backgroundColor: c.primarySoft,
-    },
+    numChipActive: { borderColor: c.primary, backgroundColor: c.primarySoft },
     numChipLabel: { fontSize: 13 * fs, color: c.text, fontWeight: '500' },
     numChipLabelActive: { color: c.primaryDark, fontWeight: '600' },
-    amenWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-    amenChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 6,
-      borderRadius: 999,
-      borderWidth: 1,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-    },
-    amenChipActive: {
-      borderColor: c.primary,
-      backgroundColor: c.primarySoft,
-    },
-    amenLabel: { fontSize: 12 * fs, color: c.text, fontWeight: '500' },
-    amenLabelActive: { color: c.primaryDark, fontWeight: '600' },
     sortCard: {
       backgroundColor: c.surface,
       borderRadius: 14,
@@ -454,12 +347,7 @@ const makeStyles = (
       justifyContent: 'center',
     },
     radioActive: { borderColor: c.primary },
-    radioDot: {
-      width: 10,
-      height: 10,
-      borderRadius: 5,
-      backgroundColor: c.primary,
-    },
+    radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: c.primary },
     bottomBar: {
       paddingHorizontal: spacing.xl,
       paddingTop: spacing.md,

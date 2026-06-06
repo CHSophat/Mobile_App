@@ -33,8 +33,9 @@ class MaintenanceRealtime {
     this.connecting = true;
     try {
       const token = await tokenStorage.getAccessToken();
-      const baseUrl = envService.getApiBaseUrl();
-      this.socket = io(`${baseUrl}/maintenance`, {
+      // Strip /api/v1 suffix — Socket.IO hub lives at the server root, not inside the REST prefix.
+      const baseUrl = envService.getApiBaseUrl().replace(/\/api\/v\d+\/?$/, '');
+      this.socket = io(`${baseUrl}/hubs/maintenance`, {
         transports: ['websocket'],
         auth: token ? { token } : undefined,
         reconnection: true,

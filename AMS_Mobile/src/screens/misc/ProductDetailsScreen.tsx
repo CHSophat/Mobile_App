@@ -1,75 +1,59 @@
-import React, { useRef, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Image,
-  TouchableOpacity,
-  FlatList,
-  useWindowDimensions,
-  NativeSyntheticEvent,
-  NativeScrollEvent,
-  Platform,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import productService, {
+  PaymentBreakdownDto,
+  ProductDto,
+  ProductStatus,
+} from '@services/api/productService';
 import { spacing } from '@theme/index';
 import { useTheme } from '@theme/ThemeContext';
-
-interface Product {
-  id: string;
-  title: string;
-  property: string;
-  beds: number;
-  baths: number;
-  area: number;
-  price: number;
-  images: string[];
-  tag: 'Available' | 'Reserved' | 'Featured';
-  description?: string;
-  amenities?: string[];
-  address?: string;
-}
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface ProductDetailsScreenProps {
   navigation: { goBack: () => void; canGoBack: () => boolean };
-  route?: { params?: { product?: Product } };
+  route?: { params?: { productId?: number } };
 }
 
-const DEFAULT_PRODUCT: Product = {
-  id: '1',
-  title: 'Riverside B-204',
-  property: 'Riverside Apartments',
-  beds: 2,
-  baths: 1,
-  area: 64,
-  price: 450,
-  images: [
-    'https://images.unsplash.com/photo-1505691938895-1758d7feb511?w=900',
-    'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=900',
-    'https://images.unsplash.com/photo-1493809842364-78817add7ffb?w=900',
-  ],
-  tag: 'Available',
-  description:
-    'Bright two-bedroom unit on the second floor with river-facing balcony. Fully furnished, recently renovated kitchen, secured building with 24/7 concierge.',
-  amenities: ['Wi-Fi', 'Parking', 'Gym', 'Pool', 'Security', 'Elevator'],
-  address: 'Street 240, Daun Penh, Phnom Penh',
-};
+type TagLabel = 'Available' | 'Reserved' | 'Maintenance' | 'Unavailable';
 
-const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({
-  navigation,
-  route,
-}) => {
+function statusToTag(status: ProductStatus): TagLabel {
+  const map: Record<ProductStatus, TagLabel> = {
+    vacant: 'Available',
+    occupied: 'Reserved',
+    maintenance: 'Maintenance',
+    unavailable: 'Unavailable',
+  };
+  return map[status];
+}
+
+function tagIcon(tag: TagLabel): any {
+  if (tag === 'Available') return 'checkmark-circle';
+  if (tag === 'Maintenance') return 'construct';
+  return 'lock-closed';
+}
+
+const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({ navigation, route }) => {
   const t = useTheme();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const isSmall = width < 360;
   const isLarge = width >= 414;
 
-  const heroHeight = Math.round(
-    Math.min(Math.max(height * 0.34, 220), width * 0.95)
-  );
+  const heroHeight = Math.round(Math.min(Math.max(height * 0.34, 220), width * 0.95));
   const bottomBarPad = Math.max(insets.bottom, spacing.md);
   const bottomBarHeight = 76 + bottomBarPad;
 
@@ -82,21 +66,102 @@ const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({
     topInset: insets.top,
   });
 
-  const product = route?.params?.product ?? DEFAULT_PRODUCT;
-  const [index, setIndex] = useState(0);
+  const productId = route?.params?.productId;
+
+  const [product, setProduct] = useState<ProductDto | null>(null);
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [breakdown, setBreakdown] = useState<PaymentBreakdownDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [photoIndex, setPhotoIndex] = useState(0);
   const listRef = useRef<FlatList>(null);
+
+  useEffect(() => {
+    if (!productId) {
+      setError('No product selected.');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [prodRes, breakRes] = await Promise.allSettled([
+          productService.getById(productId),
+          productService.getPaymentBreakdown(productId),
+        ]);
+
+        if (cancelled) return;
+
+        if (prodRes.status === 'fulfilled') {
+          const raw = prodRes.value as any;
+          const prod: ProductDto = raw?.data ?? raw;
+          setProduct(prod);
+          // Use embedded photos array from the product; fall back to primaryPhoto only
+          const photoUrls: string[] =
+            Array.isArray(prod?.photos) && prod.photos.length > 0
+              ? prod.photos
+              : prod?.primaryPhoto
+              ? [prod.primaryPhoto]
+              : [];
+          setPhotos(photoUrls);
+        } else {
+          setError(prodRes.reason?.message ?? 'Failed to load product');
+        }
+
+        if (breakRes.status === 'fulfilled') {
+          const raw = breakRes.value as any;
+          setBreakdown(raw?.data ?? raw ?? null);
+        }
+      } catch (e: any) {
+        if (!cancelled) setError(e?.message ?? 'Failed to load product');
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [productId]);
 
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
     const i = Math.round(e.nativeEvent.contentOffset.x / width);
-    if (i !== index) setIndex(i);
+    if (i !== photoIndex) setPhotoIndex(i);
   };
 
+  if (loading) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center' }]}>
+        <ActivityIndicator size="large" color={t.colors.primary} />
+      </View>
+    );
+  }
+
+  if (error || !product) {
+    return (
+      <View style={[styles.container, { alignItems: 'center', justifyContent: 'center', gap: spacing.md }]}>
+        <Ionicons name="alert-circle-outline" size={40} color={t.colors.textHint} />
+        <Text style={{ color: t.colors.textSecondary, fontSize: 15 * t.fontScale, textAlign: 'center', paddingHorizontal: spacing.xl }}>
+          {error ?? 'Product not found'}
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: t.colors.primary, paddingHorizontal: spacing.xl, paddingVertical: spacing.sm, borderRadius: 999 }}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={{ color: t.colors.white, fontWeight: '700', fontSize: 14 * t.fontScale }}>Go back</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const tag = statusToTag(product.status);
   const tagColor =
-    product.tag === 'Available'
-      ? t.colors.success
-      : product.tag === 'Featured'
-      ? t.colors.warning
-      : t.colors.textSecondary;
+    tag === 'Available' ? t.colors.success : tag === 'Maintenance' ? t.colors.warning : t.colors.textSecondary;
+
+  const imageUrls = photos.map((p) => p.photoUrl);
+  const hasPhotos = imageUrls.length > 0;
 
   return (
     <View style={styles.container}>
@@ -108,20 +173,9 @@ const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({
         >
           <Ionicons name="chevron-back" size={22} color={t.colors.text} />
         </TouchableOpacity>
-        <View style={{ flexDirection: 'row', gap: spacing.sm }}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="share-outline" size={20} color={t.colors.text} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          >
-            <Ionicons name="heart-outline" size={22} color={t.colors.text} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity style={styles.iconBtn} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+          <Ionicons name="share-outline" size={20} color={t.colors.text} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -129,114 +183,73 @@ const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({
         contentContainerStyle={{ paddingBottom: bottomBarHeight + spacing.md }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Hero / photos */}
         <View style={{ width, height: heroHeight }}>
-          <FlatList
-            ref={listRef}
-            data={product.images}
-            keyExtractor={(_, i) => String(i)}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            onScroll={onScroll}
-            scrollEventThrottle={16}
-            getItemLayout={(_, i) => ({
-              length: width,
-              offset: width * i,
-              index: i,
-            })}
-            renderItem={({ item }) => (
-              <Image
-                source={{ uri: item }}
-                style={{ width, height: heroHeight }}
-                resizeMode="cover"
+          {hasPhotos ? (
+            <>
+              <FlatList
+                ref={listRef}
+                data={imageUrls}
+                keyExtractor={(_, i) => String(i)}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                getItemLayout={(_, i) => ({ length: width, offset: width * i, index: i })}
+                renderItem={({ item }) => (
+                  <Image source={{ uri: item }} style={{ width, height: heroHeight }} resizeMode="cover" />
+                )}
               />
-            )}
-          />
-          <View
-            style={[
-              styles.tag,
-              {
-                top: insets.top + spacing.sm,
-                backgroundColor: tagColor + 'EE',
-              },
-            ]}
-          >
-            <Ionicons
-              name={
-                product.tag === 'Available'
-                  ? 'checkmark-circle'
-                  : product.tag === 'Featured'
-                  ? 'star'
-                  : 'lock-closed'
-              }
-              size={11}
-              color={t.colors.white}
-            />
-            <Text style={styles.tagText}>{product.tag}</Text>
-          </View>
-          <View style={styles.dotsRow}>
-            {product.images.map((_, i) => (
-              <View
-                key={i}
-                style={[styles.dot, i === index && styles.dotActive]}
-              />
-            ))}
-          </View>
-          <View style={styles.imageCounter}>
-            <Ionicons name="images-outline" size={12} color={t.colors.white} />
-            <Text style={styles.imageCounterText}>
-              {index + 1} / {product.images.length}
-            </Text>
+              <View style={styles.dotsRow}>
+                {imageUrls.map((_, i) => (
+                  <View key={i} style={[styles.dot, i === photoIndex && styles.dotActive]} />
+                ))}
+              </View>
+              <View style={styles.imageCounter}>
+                <Ionicons name="images-outline" size={12} color={t.colors.white} />
+                <Text style={styles.imageCounterText}>
+                  {photoIndex + 1} / {imageUrls.length}
+                </Text>
+              </View>
+            </>
+          ) : (
+            <View style={[styles.photoPlaceholder, { height: heroHeight }]}>
+              <Ionicons name="home-outline" size={56} color={t.colors.primary + '66'} />
+            </View>
+          )}
+
+          <View style={[styles.tag, { top: insets.top + spacing.sm, backgroundColor: tagColor + 'EE' }]}>
+            <Ionicons name={tagIcon(tag)} size={11} color={t.colors.white} />
+            <Text style={styles.tagText}>{tag}</Text>
           </View>
         </View>
 
         <View style={styles.body}>
-          <View style={styles.titleRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.title} numberOfLines={2}>
-                {product.title}
-              </Text>
-              <Text style={styles.subtitle}>{product.property}</Text>
-            </View>
-          </View>
-
-          {product.address ? (
-            <View style={styles.addrRow}>
-              <Ionicons
-                name="location-outline"
-                size={14}
-                color={t.colors.textSecondary}
-              />
-              <Text style={styles.addrText} numberOfLines={2}>
-                {product.address}
-              </Text>
-            </View>
-          ) : null}
+          <Text style={styles.title} numberOfLines={2}>
+            {product.name ?? product.code}
+          </Text>
+          <Text style={styles.subtitle}>
+            {product.productType.charAt(0).toUpperCase() + product.productType.slice(1)}
+            {product.floorNumber != null ? ` · Floor ${product.floorNumber}` : ''}
+          </Text>
 
           <View style={styles.statsRow}>
-            <Stat
-              icon="bed-outline"
-              value={`${product.beds}`}
-              label="Bedrooms"
-              c={t.colors}
-              fs={t.fontScale}
-            />
-            <View style={styles.statDivider} />
-            <Stat
-              icon="water-outline"
-              value={`${product.baths}`}
-              label="Bathrooms"
-              c={t.colors}
-              fs={t.fontScale}
-            />
-            <View style={styles.statDivider} />
-            <Stat
-              icon="resize-outline"
-              value={`${product.area}`}
-              label="m²"
-              c={t.colors}
-              fs={t.fontScale}
-            />
+            {product.bedrooms != null && (
+              <>
+                <Stat icon="bed-outline" value={`${product.bedrooms}`} label="Bedrooms" c={t.colors} fs={t.fontScale} />
+                <View style={styles.statDivider} />
+              </>
+            )}
+            {product.bathrooms != null && (
+              <>
+                <Stat icon="water-outline" value={`${product.bathrooms}`} label="Bathrooms" c={t.colors} fs={t.fontScale} />
+                <View style={styles.statDivider} />
+              </>
+            )}
+            {product.squareFeet != null && (
+              <Stat icon="resize-outline" value={`${product.squareFeet}`} label="sq ft" c={t.colors} fs={t.fontScale} />
+            )}
           </View>
 
           {product.description ? (
@@ -246,52 +259,33 @@ const ProductDetailsScreen: React.FC<ProductDetailsScreenProps> = ({
             </>
           ) : null}
 
-          {product.amenities && product.amenities.length > 0 ? (
+          {breakdown ? (
             <>
-              <Text style={styles.section}>Amenities</Text>
-              <View style={styles.amenityWrap}>
-                {product.amenities.map((a) => (
-                  <View key={a} style={styles.amenityChip}>
-                    <Ionicons
-                      name="checkmark-circle"
-                      size={14}
-                      color={t.colors.primary}
-                    />
-                    <Text style={styles.amenityLabel}>{a}</Text>
-                  </View>
-                ))}
+              <Text style={styles.section}>Payment breakdown</Text>
+              <View style={styles.breakdownCard}>
+                <BreakdownRow label="Base rent" value={breakdown.baseRent} currency={breakdown.currency} c={t.colors} fs={t.fontScale} />
+                <BreakdownRow label="Taxes" value={breakdown.taxes} currency={breakdown.currency} c={t.colors} fs={t.fontScale} />
+                <BreakdownRow label="Fees" value={breakdown.fees} currency={breakdown.currency} c={t.colors} fs={t.fontScale} />
+                <View style={styles.breakdownDivider} />
+                <BreakdownRow label="Total / month" value={breakdown.totalMonthly} currency={breakdown.currency} c={t.colors} fs={t.fontScale} bold />
               </View>
             </>
           ) : null}
-
-          <Text style={styles.section}>Location</Text>
-          <View style={styles.mapCard}>
-            <Ionicons
-              name="map-outline"
-              size={36}
-              color={t.colors.textSecondary}
-            />
-            <Text style={styles.mapHint}>Map preview</Text>
-          </View>
         </View>
       </ScrollView>
 
       <View style={[styles.bottomBar, { paddingBottom: bottomBarPad }]}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.priceLabel}>Price</Text>
+          <Text style={styles.priceLabel}>Base price</Text>
           <View style={styles.priceRow}>
             <Text style={styles.priceValue} numberOfLines={1}>
-              ${product.price}
+              ${product.basePrice}
             </Text>
             <Text style={styles.priceUnit}>/ month</Text>
           </View>
         </View>
         <TouchableOpacity style={styles.bookBtn} activeOpacity={0.85}>
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={16}
-            color={t.colors.white}
-          />
+          <Ionicons name="chatbubble-ellipses-outline" size={16} color={t.colors.white} />
           <Text style={styles.bookBtnLabel}>Contact agent</Text>
         </TouchableOpacity>
       </View>
@@ -308,22 +302,29 @@ const Stat: React.FC<{
 }> = ({ icon, value, label, c, fs }) => (
   <View style={{ flex: 1, alignItems: 'center', paddingVertical: 4 }}>
     <Ionicons name={icon} size={18} color={c.primary} />
-    <Text
-      style={{
-        fontSize: 15 * fs,
-        fontWeight: '700',
-        color: c.text,
-        marginTop: 4,
-      }}
-      numberOfLines={1}
-    >
+    <Text style={{ fontSize: 15 * fs, fontWeight: '700', color: c.text, marginTop: 4 }} numberOfLines={1}>
       {value}
     </Text>
-    <Text
-      style={{ fontSize: 11 * fs, color: c.textSecondary, textAlign: 'center' }}
-      numberOfLines={1}
-    >
+    <Text style={{ fontSize: 11 * fs, color: c.textSecondary, textAlign: 'center' }} numberOfLines={1}>
       {label}
+    </Text>
+  </View>
+);
+
+const BreakdownRow: React.FC<{
+  label: string;
+  value: number;
+  currency: string;
+  c: ReturnType<typeof useTheme>['colors'];
+  fs: number;
+  bold?: boolean;
+}> = ({ label, value, currency, c, fs, bold }) => (
+  <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 }}>
+    <Text style={{ fontSize: 14 * fs, color: bold ? c.text : c.textSecondary, fontWeight: bold ? '700' : '400' }}>
+      {label}
+    </Text>
+    <Text style={{ fontSize: 14 * fs, color: bold ? c.text : c.textSecondary, fontWeight: bold ? '700' : '500' }}>
+      {currency} {value.toFixed(2)}
     </Text>
   </View>
 );
@@ -337,11 +338,7 @@ interface StyleOpts {
   topInset: number;
 }
 
-const makeStyles = (
-  c: ReturnType<typeof useTheme>['colors'],
-  fs: number,
-  o: StyleOpts
-) => {
+const makeStyles = (c: ReturnType<typeof useTheme>['colors'], fs: number, o: StyleOpts) => {
   const bodyPad = o.isSmall ? spacing.lg : spacing.xl;
   const titleSize = o.isLarge ? 24 : o.isSmall ? 20 : 22;
   return StyleSheet.create({
@@ -363,14 +360,15 @@ const makeStyles = (
       alignItems: 'center',
       justifyContent: 'center',
       ...Platform.select({
-        ios: {
-          shadowColor: '#000',
-          shadowOpacity: 0.12,
-          shadowRadius: 6,
-          shadowOffset: { width: 0, height: 2 },
-        },
+        ios: { shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 6, shadowOffset: { width: 0, height: 2 } },
         android: { elevation: 3 },
       }),
+    },
+    photoPlaceholder: {
+      width: '100%',
+      backgroundColor: c.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     dotsRow: {
       position: 'absolute',
@@ -387,12 +385,7 @@ const makeStyles = (
       backgroundColor: 'rgba(255,255,255,0.6)',
       marginHorizontal: 3,
     },
-    dotActive: {
-      backgroundColor: c.white,
-      width: 9,
-      height: 9,
-      borderRadius: 5,
-    },
+    dotActive: { backgroundColor: c.white, width: 9, height: 9, borderRadius: 5 },
     tag: {
       position: 'absolute',
       left: spacing.lg,
@@ -418,20 +411,8 @@ const makeStyles = (
     },
     imageCounterText: { color: c.white, fontSize: 11 * fs, fontWeight: '600' },
     body: { padding: bodyPad },
-    titleRow: { flexDirection: 'row', alignItems: 'flex-start' },
     title: { fontSize: titleSize * fs, fontWeight: '700', color: c.text },
-    subtitle: {
-      fontSize: 14 * fs,
-      color: c.textSecondary,
-      marginTop: 2,
-    },
-    addrRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginTop: spacing.sm,
-    },
-    addrText: { flex: 1, fontSize: 13 * fs, color: c.textSecondary },
+    subtitle: { fontSize: 14 * fs, color: c.textSecondary, marginTop: 2 },
     statsRow: {
       flexDirection: 'row',
       backgroundColor: c.surface,
@@ -449,33 +430,20 @@ const makeStyles = (
       marginTop: spacing.xl,
       marginBottom: spacing.sm,
     },
-    description: {
-      fontSize: 14 * fs,
-      color: c.textSecondary,
-      lineHeight: 21,
-    },
-    amenityWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-    amenityChip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: c.primarySoft,
-      paddingHorizontal: spacing.md,
-      paddingVertical: 6,
-      borderRadius: 999,
-    },
-    amenityLabel: { color: c.primaryDark, fontSize: 12 * fs, fontWeight: '500' },
-    mapCard: {
-      height: 140,
+    description: { fontSize: 14 * fs, color: c.textSecondary, lineHeight: 21 },
+    breakdownCard: {
       backgroundColor: c.surface,
       borderRadius: 14,
       borderWidth: 1,
       borderColor: c.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 6,
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
     },
-    mapHint: { fontSize: 12 * fs, color: c.textSecondary },
+    breakdownDivider: {
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: c.border,
+      marginVertical: spacing.sm,
+    },
     bottomBar: {
       position: 'absolute',
       left: 0,
@@ -505,11 +473,7 @@ const makeStyles = (
       alignSelf: 'stretch',
       justifyContent: 'center',
     },
-    bookBtnLabel: {
-      color: c.white,
-      fontWeight: '700',
-      fontSize: (o.isSmall ? 13 : 14) * fs,
-    },
+    bookBtnLabel: { color: c.white, fontWeight: '700', fontSize: (o.isSmall ? 13 : 14) * fs },
   });
 };
 

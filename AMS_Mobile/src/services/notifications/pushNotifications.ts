@@ -2,7 +2,11 @@ import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
 import Constants from 'expo-constants';
 import { communicationService } from '../api/communicationService';
-import { PushNotificationPayload } from '@types/communication.types';
+// Aliased to avoid collision with the global DOM `Notification` interface
+import type {
+  Notification as AppNotification,
+  PushNotificationPayload,
+} from '../../types/communication.types';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -19,8 +23,7 @@ export class NotificationService {
     if (this.initialized) return;
 
     try {
-      const { status: existingStatus } =
-        await Notifications.getPermissionsAsync();
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
 
       if (existingStatus !== 'granted') {
@@ -39,21 +42,21 @@ export class NotificationService {
 
       if (projectId) {
         try {
-          const token = await Notifications.getExpoPushTokenAsync({
-            projectId,
-          });
+          const token = await Notifications.getExpoPushTokenAsync({ projectId });
           await SecureStore.setItemAsync('expoPushToken', token.data);
         } catch (tokenErr) {
-          console.warn(
-            '[notifications] Could not fetch Expo push token (non-fatal):',
-            tokenErr
-          );
+          // Firebase not configured in dev builds — push tokens won't work until
+          // google-services.json / GoogleService-Info.plist are added.
+          if (__DEV__) {
+            console.log('[notifications] Push token skipped (Firebase not configured in dev)');
+          } else {
+            console.warn('[notifications] Could not fetch Expo push token:', tokenErr);
+          }
         }
       }
 
-      // Set up socket listener for notifications
-      communicationService.on('new_notification', (notification) => {
-        this.showNotification(notification);
+      communicationService.on('new_notification', (n: AppNotification) => {
+        this.showNotification(n);
       });
 
       this.initialized = true;
@@ -75,11 +78,13 @@ export class NotificationService {
     });
   }
 
-  public async showNotification(data: any): Promise<void> {
+  public async showNotification(data: AppNotification): Promise<void> {
     this.sendLocalNotification({
       title: data.title,
       body: data.body,
-      data: data.data || {},
+      data: data.data
+        ? Object.fromEntries(Object.entries(data.data).map(([k, v]) => [k, String(v)]))
+        : {},
       deepLink: data.deepLink,
     });
   }
@@ -87,13 +92,15 @@ export class NotificationService {
   public onNotificationReceived(
     callback: (notification: Notifications.Notification) => void
   ): () => void {
-    return Notifications.addNotificationReceivedListener(callback);
+    const sub = Notifications.addNotificationReceivedListener(callback);
+    return () => { sub.remove(); };
   }
 
   public onNotificationResponse(
     callback: (response: Notifications.NotificationResponse) => void
   ): () => void {
-    return Notifications.addNotificationResponseReceivedListener(callback);
+    const sub = Notifications.addNotificationResponseReceivedListener(callback);
+    return () => { sub.remove(); };
   }
 }
 
