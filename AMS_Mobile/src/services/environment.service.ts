@@ -1,4 +1,19 @@
+import { Platform } from 'react-native';
 import ENV_CONFIG from '../../env.development';
+
+/**
+ * Android emulators route "localhost"/"127.0.0.1" to the emulator VM itself,
+ * not the host machine running the API. 10.0.2.2 is the special alias that
+ * reaches the host loopback. We rewrite the host here so a stray
+ * EXPO_PUBLIC_API_URL=http://localhost:... (e.g. copied from a web .env) still
+ * works on the Android emulator without anyone having to edit it.
+ * Physical devices need the machine's LAN IP, which won't match this rule and
+ * is left untouched.
+ */
+const rewriteHostForAndroid = (url: string): string => {
+  if (Platform.OS !== 'android') return url;
+  return url.replace(/(\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/i, '$110.0.2.2');
+};
 
 /**
  * Environment service for managing environment-specific configurations
@@ -54,11 +69,11 @@ import ENV_CONFIG from '../../env.development';
    * binary works for web/emulator/USB device without editing source.
    */
   getApiBaseUrl(): string {
-    return process.env.EXPO_PUBLIC_API_URL || this.config.API_BASE_URL;
+    return rewriteHostForAndroid(process.env.EXPO_PUBLIC_API_URL || this.config.API_BASE_URL);
   }
 
   getApiWebUrl(): string {
-    return process.env.EXPO_PUBLIC_WEB_URL || this.config.WEB_URL;
+    return rewriteHostForAndroid(process.env.EXPO_PUBLIC_WEB_URL || this.config.WEB_URL);
   }
 
   /**

@@ -155,6 +155,19 @@ export const paymentServiceV2 = {
     return unwrap(res);
   },
 
+  /**
+   * POST /payments/bakong/webhook — Bakong settlement callback.
+   * This is normally invoked server-to-server by the Bakong gateway, not by the
+   * mobile client. Exposed here only for local testing / simulating a callback.
+   */
+  async bakongWebhook(payload: Record<string, unknown>): Promise<void> {
+    const res = await apiClient.post<ApiResponse<void>>(
+      endpointsV2.payments.bakongWebhook,
+      payload
+    );
+    unwrap(res);
+  },
+
   async confirm(id: number | string): Promise<Payment> {
     const res = await apiClient.post<ApiResponse<Payment>>(endpointsV2.payments.confirm(id), {});
     return unwrap(res);
